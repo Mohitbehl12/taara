@@ -63,7 +63,7 @@ export function PanditFields({ v, set, showName = true }: { v: PanditValues; set
           <T>{t('pandit.free_participate')}</T>
           <T v="small" color={c.inkSoft}>{t('pandit.free_participate_hint', { rate: rupees(300) })}</T>
         </View>
-        <Switch value={v.participatesInFree} onValueChange={(participatesInFree) => set({ ...v, participatesInFree })} trackColor={{ true: c.primary }} />
+        <Switch value={v.participatesInFree} onValueChange={(participatesInFree) => set({ ...v, participatesInFree })} trackColor={{ true: c.primary, false: c.line }} thumbColor={c.surface} ios_backgroundColor={c.line} />
       </View>
     </View>
   );

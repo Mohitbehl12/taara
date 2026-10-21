@@ -28,7 +28,7 @@ export function StartPanditSheet({ pandit, onClose }: { pandit: Pandit | null; o
       <T>{free ? t('consult.price_free', { minutes: freeMin, price }) : t('consult.price_paid', { price, balance: rupees(user?.balancePaise ?? 0) })}</T>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.m }}>
         <T v="small" style={{ flex: 1 }} color={c.inkSoft}>{t('consult.share_chart')}</T>
-        <Switch value={share} onValueChange={setShare} trackColor={{ true: c.primary }} accessibilityLabel={t('consult.share_chart')} />
+        <Switch value={share} onValueChange={setShare} trackColor={{ true: c.primary, false: c.line }} thumbColor={c.surface} ios_backgroundColor={c.line} accessibilityLabel={t('consult.share_chart')} />
       </View>
       {!free && (user?.balancePaise ?? 0) < pandit.chatRatePaise ? (
         <Button title={t('session.add_money')} kind="marigold" onPress={() => { onClose(); router.push('/topup'); }} />

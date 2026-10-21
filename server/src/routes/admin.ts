@@ -5,14 +5,31 @@ import { z } from 'zod';
 import { db, schema } from '../db/client.js';
 import { handler, HttpError, requireAdmin, requireAuth } from '../lib/http.js';
 import { allSettings, DEFAULT_SETTINGS, setSetting, type SettingKey } from '../lib/settings.js';
-import { moveUserMoney, platformEntry } from '../services/wallet.js';
+import { movePanditMoney, moveUserMoney, platformEntry } from '../services/wallet.js';
 import { notify, sendPush } from '../services/notify.js';
 import { translate } from '../services/translate.js';
 import { publicUser } from './account.js';
 import { UPLOAD_DIR } from './reports.js';
 
 export const adminRoutes = Router();
+// Optional extra lock: ADMIN_IP_ALLOWLIST=1.2.3.4,5.6.7.8 restricts the admin API to office/VPN addresses.
+const adminIps = (process.env.ADMIN_IP_ALLOWLIST ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+adminRoutes.use('/admin', (req, _res, next) => next(adminIps.length && !adminIps.includes(req.ip ?? '') ? new HttpError(403, 'forbidden') : undefined));
 adminRoutes.use('/admin', requireAuth, requireAdmin);
+
+// Audit trail: every state-changing admin request is recorded (who, what, when).
+adminRoutes.use('/admin', (req, res, next) => {
+  if (req.method === 'GET') return next();
+  res.on('finish', () => {
+    if (res.statusCode >= 400) return;
+    db().insert(schema.adminAudit).values({ adminId: req.user!.id, method: req.method, path: req.originalUrl.slice(0, 300), body: (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) ? req.body : {} })
+      .catch((e) => console.error('audit', e));
+  });
+  next();
+});
+
+adminRoutes.get('/admin/audit', handler({}, async () =>
+  db().select().from(schema.adminAudit).orderBy(desc(schema.adminAudit.createdAt)).limit(300)));
 
 adminRoutes.use('/admin/files', express.static(path.join(UPLOAD_DIR, 'private'), { fallthrough: false }));
 
@@ -141,7 +158,14 @@ adminRoutes.get('/admin/payouts', handler({}, async () =>
     .innerJoin(schema.pandits, eq(schema.pandits.id, schema.payouts.panditId)).orderBy(desc(schema.payouts.createdAt)).limit(200)));
 
 adminRoutes.post('/admin/payouts/:id', handler({ body: z.object({ status: z.enum(['processing', 'paid', 'failed']), providerRef: z.string().optional() }) }, async ({ req, body }) =>
-  (await db().update(schema.payouts).set(body).where(eq(schema.payouts.id, String(req.params.id))).returning())[0]));
+  db().transaction(async (tx) => {
+    const [po] = await tx.select().from(schema.payouts).where(eq(schema.payouts.id, String(req.params.id))).for('update');
+    if (!po) throw new HttpError(404, 'not_found');
+    if (po.status === 'paid' || po.status === 'failed') throw new HttpError(409, 'payout_already_final');
+    // A failed transfer returns the money to the Pandit's earnings balance.
+    if (body.status === 'failed') await movePanditMoney(tx, po.panditId, po.amountPaise, 'adjustment', { note: `payout ${po.id} failed` });
+    return (await tx.update(schema.payouts).set(body).where(eq(schema.payouts.id, po.id)).returning())[0];
+  })));
 
 // ---------- sessions, payments, complaints, reviews ----------
 adminRoutes.get('/admin/sessions', handler({ query: z.object({ status: z.string().optional() }) }, async ({ query }) =>
@@ -172,6 +196,12 @@ adminRoutes.put('/admin/settings', handler({ body: z.record(z.string(), z.unknow
     const def = DEFAULT_SETTINGS[k as SettingKey];
     if (typeof def !== typeof v || Array.isArray(def) !== Array.isArray(v)) throw new HttpError(400, 'bad_setting_type', k);
     if (typeof v === 'number' && (v < 0 || !Number.isFinite(v))) throw new HttpError(400, 'bad_setting_value', k);
+    const ranges: Partial<Record<SettingKey, [number, number]>> = {
+      'pandit.commission_pct': [0, 100], 'gst.pct': [0, 28], 'free.pandit_minutes': [0, 240], 'ai.idle_pause_seconds': [30, 1800],
+      'ai.rate_per_min_paise': [0, 100_000], 'pandit.min_rate_paise': [100, 100_000], 'pandit.max_rate_paise': [100, 1_000_000],
+    };
+    const r = ranges[k as SettingKey];
+    if (r && typeof v === 'number' && (v < r[0] || v > r[1])) throw new HttpError(400, 'bad_setting_value', `${k} must be ${r[0]}–${r[1]}`);
     await setSetting(k as SettingKey, v);
   }
   return allSettings();
@@ -185,7 +215,8 @@ adminRoutes.post('/admin/broadcast', handler({
     .from(schema.users).where(and(eq(schema.users.blocked, false), body.language ? eq(schema.users.language, body.language) : undefined));
   const byLang = new Map<string, { title: string; body: string }>();
   for (const l of new Set(users.map((u) => u.lang))) byLang.set(l, { title: await translate(body.title, l, 'en'), body: await translate(body.body, l, 'en') });
-  const pushes = users.filter((u) => u.token && u.prefs.campaigns !== false).map((u) => ({ to: u.token!, ...byLang.get(u.lang)!, data: { kind: 'campaign' } }));
+  // Marketing is opt-in only (DPDP Act: separate, specific consent). Users who never turned it on get nothing.
+  const pushes = users.filter((u) => u.token && u.prefs.campaigns === true).map((u) => ({ to: u.token!, ...byLang.get(u.lang)!, data: { kind: 'campaign' } }));
   for (let i = 0; i < pushes.length; i += 100) await sendPush(pushes.slice(i, i + 100));
   return { recipients: users.length, pushed: pushes.length };
 }));

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { LANGUAGES } from '../config/languages.js';
+import { ageOn, requireAdult } from '../services/safety.js';
 import { db, schema } from '../db/client.js';
 import { computeChart } from '../astro/engine.js';
 import { chartSummary, dailyEnergy } from '../astro/interpret.js';
@@ -61,6 +62,9 @@ const profileBody = z.object({
 });
 
 astroRoutes.post('/profiles', requireAuth, handler({ body: profileBody }, async ({ body, user }) => {
+  await requireAdult(user.id);
+  // Taara is 18+. A user's own chart with an under-18 birth date means they can't use the app.
+  if (body.relation === 'self' && ageOn(body.date) < 18) throw new HttpError(403, 'age_restricted');
   const tz = body.tzOffsetMinutes ?? tzOffsetAt(body.lat, body.lon, body.date, body.time ?? '12:00').tzOffsetMinutes;
   const existing = await db().select({ id: schema.birthProfiles.id }).from(schema.birthProfiles).where(eq(schema.birthProfiles.userId, user.id));
   if (existing.length >= 20) throw new HttpError(400, 'too_many_profiles');

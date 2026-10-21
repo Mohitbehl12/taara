@@ -6,6 +6,7 @@ import { handler, requireAuth } from '../lib/http.js';
 import { confirmTopup, createTopup, creditPayment, verifyWebhook } from '../services/payments.js';
 import { track } from '../services/analytics.js';
 import { notify } from '../services/notify.js';
+import { requireAdult } from '../services/safety.js';
 
 export const walletRoutes = Router();
 
@@ -19,8 +20,10 @@ walletRoutes.get('/wallet/transactions', requireAuth, handler({ query: z.object(
   db().select().from(schema.ledger).where(and(eq(schema.ledger.account, 'user'), eq(schema.ledger.ownerId, user.id)))
     .orderBy(desc(schema.ledger.createdAt)).limit(100)));
 
-walletRoutes.post('/wallet/topup', requireAuth, handler({ body: z.object({ creditPaise: z.number().int() }) }, ({ body, user }) =>
-  createTopup(user.id, body.creditPaise)));
+walletRoutes.post('/wallet/topup', requireAuth, handler({ body: z.object({ creditPaise: z.number().int() }) }, async ({ body, user }) => {
+  await requireAdult(user.id);
+  return createTopup(user.id, body.creditPaise);
+}));
 
 walletRoutes.post('/wallet/topup/confirm', requireAuth, handler({
   body: z.object({ orderId: z.string(), paymentId: z.string().optional(), signature: z.string().optional() }),

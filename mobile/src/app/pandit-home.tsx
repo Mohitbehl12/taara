@@ -60,7 +60,7 @@ export default function PanditHome() {
           <T v="h2" color={isOnline ? c.onLeaf : c.ink}>{isOnline ? t('common.online') : t('common.offline')}</T>
           <T v="small" color={isOnline ? c.onLeaf : c.inkSoft}>{isOnline ? t('pandit.you_are_online') : t('pandit.you_are_offline')}</T>
         </View>
-        <Switch value={isOnline} onValueChange={toggle} accessibilityLabel={isOnline ? t('pandit.go_offline') : t('pandit.go_online')} />
+        <Switch value={isOnline} onValueChange={toggle} trackColor={{ true: c.marigold, false: c.line }} thumbColor={c.surface} ios_backgroundColor={c.line} accessibilityLabel={isOnline ? t('pandit.go_offline') : t('pandit.go_online')} />
       </View>
 
       {pending.length ? (

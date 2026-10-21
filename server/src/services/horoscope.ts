@@ -55,7 +55,7 @@ async function generateEnglish(sign: number, period: Period, key: string): Promi
 Energy scores (0-100): ${JSON.stringify(base.energy)}.
 Return strict JSON with string fields: general, love, career, finance, health, family, growth, advice.
 Each field 1–3 short sentences, warm and practical, plain English a beginner understands, no astrology jargon except naming a planet,
-no fear, no guaranteed outcomes, no medical claims. "advice" is one actionable line for the ${period === 'daily' ? 'day' : period.replace('ly', '')}.`,
+no fear, no guaranteed outcomes, no medical claims, no predictions of death, illness or accidents. "advice" is one actionable line for the ${period === 'daily' ? 'day' : period.replace('ly', '')}.`,
     { system: 'You are a careful Vedic astrology writer. Output JSON only.', maxTokens: 900, fast: true },
   );
   if (ai) {

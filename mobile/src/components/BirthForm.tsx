@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { space, useTheme } from '@/lib/theme';
 import { Button, Chip, Field, T } from './ui';
 import { PlaceSearch, type Place } from './PlaceSearch';
+import { errorMessage } from '@/lib/errors';
 
 export interface BirthValues {
   name: string; date: Date | null; time: Date | null; timeAccuracy: 'exact' | 'approx' | 'unknown'; place: Place | null;
@@ -125,7 +126,7 @@ export function BirthForm({ initial, onSubmit, submitLabel, extraStep, askRelati
   const next = async () => {
     if (step < steps.length - 1) { setStep(step + 1); return; }
     setBusy(true); setError(null);
-    try { await onSubmit({ ...v, relation }); } catch (e: any) { setError(e.code === 'network' ? t('common.network_error') : t('common.error_generic')); setBusy(false); }
+    try { await onSubmit({ ...v, relation }); } catch (e: any) { setError(errorMessage(t, e)); setBusy(false); }
   };
 
   return (

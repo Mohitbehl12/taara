@@ -3,10 +3,10 @@ import { createRoot } from 'react-dom/client';
 import './styles.css';
 import { api, dt, getToken, inr, openPrivate, setToken } from './api';
 
-type Page = 'dashboard' | 'pandits' | 'users' | 'sessions' | 'payments' | 'payouts' | 'complaints' | 'pricing' | 'broadcast';
+type Page = 'dashboard' | 'pandits' | 'users' | 'sessions' | 'payments' | 'payouts' | 'complaints' | 'pricing' | 'broadcast' | 'audit';
 const PAGES: [Page, string][] = [
   ['dashboard', 'Dashboard'], ['pandits', 'Pandits & verification'], ['users', 'Users'], ['sessions', 'Consultations'],
-  ['payments', 'Payments'], ['payouts', 'Payouts'], ['complaints', 'Complaints'], ['pricing', 'Pricing & promotions'], ['broadcast', 'Notifications'],
+  ['payments', 'Payments'], ['payouts', 'Payouts'], ['complaints', 'Complaints'], ['pricing', 'Pricing & promotions'], ['broadcast', 'Notifications'], ['audit', 'Audit log'],
 ];
 
 function useLoad<T>(path: string | null) {
@@ -331,10 +331,34 @@ function Complaints() {
   return (
     <>
       <h2>Complaints</h2>
-      <table><thead><tr><th>When</th><th>Category</th><th>Text</th><th>Status</th><th></th></tr></thead>
-        <tbody>{list.data?.map((c) => (
-          <tr key={c.id}><td>{dt(c.createdAt)}</td><td>{c.category}</td><td>{c.text}{c.resolution ? <div className="muted">→ {c.resolution}</div> : null}</td><td><Pill s={c.status} /></td>
+      <p className="muted">IT Rules 2021: resolve within 15 days. Rows older than 10 days are highlighted. Reports of sexual content or impersonation must be acted on within 24 hours.</p>
+      <table><thead><tr><th>Ref</th><th>When</th><th>Category</th><th>Text</th><th>Links</th><th>Status</th><th></th></tr></thead>
+        <tbody>{list.data?.map((c) => {
+          const overdue = c.status === 'open' && Date.now() - new Date(c.createdAt).getTime() > 10 * 86_400_000;
+          return (
+          <tr key={c.id} style={overdue ? { background: 'rgba(194,80,10,0.12)' } : undefined}>
+            <td><code>{c.id.slice(0, 8).toUpperCase()}</code></td><td>{dt(c.createdAt)}</td><td>{c.category}</td>
+            <td>{c.text}{c.resolution ? <div className="muted">→ {c.resolution}</div> : null}</td>
+            <td className="muted">{c.sessionId ? <div>session {c.sessionId.slice(0, 8)}</div> : null}{c.messageId ? <div>message {c.messageId.slice(0, 8)}</div> : null}{c.panditId ? <div>pandit {c.panditId.slice(0, 8)}</div> : null}</td>
+            <td><Pill s={c.status} /></td>
             <td className="row">{c.status === 'open' ? <><button className="btn ok" onClick={() => resolve(c.id, 'resolved')}>Resolve</button><button className="btn secondary" onClick={() => resolve(c.id, 'rejected')}>Reject</button></> : null}</td></tr>
+          );
+        })}</tbody></table>
+    </>
+  );
+}
+
+// ---------------- audit ----------------
+function Audit() {
+  const list = useLoad<any[]>('/admin/audit');
+  return (
+    <>
+      <h2>Audit log</h2>
+      <p className="muted">Every change made from this panel: who, what and when. Kept for accountability; cannot be edited.</p>
+      <table><thead><tr><th>When</th><th>Admin</th><th>Action</th><th>Details</th></tr></thead>
+        <tbody>{list.data?.map((a) => (
+          <tr key={a.id}><td>{dt(a.createdAt)}</td><td><code>{a.adminId.slice(0, 8)}</code></td><td>{a.method} {a.path.replace('/admin/', '')}</td>
+            <td className="muted" style={{ maxWidth: 420, wordBreak: 'break-word' }}>{JSON.stringify(a.body)}</td></tr>
         ))}</tbody></table>
     </>
   );
@@ -428,6 +452,7 @@ function Broadcast() {
         <p className="muted">Write in English. Each user receives it translated into their own app language.</p>
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title, e.g. Happy Diwali 🪔" maxLength={80} />
         <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Message" rows={3} maxLength={240} />
+        <p className="muted">Sent only to users who opted in to offers &amp; festival updates (marketing is opt-in under the DPDP Act).</p>
         <label>Only users whose language is <input value={lang} onChange={(e) => setLang(e.target.value)} placeholder="all (or e.g. hi, ta)" style={{ width: 160 }} /></label>
         <button className="btn" disabled={title.length < 2 || body.length < 2} onClick={async () => {
           if (!confirm('Send to all matching users?')) return;
@@ -445,7 +470,7 @@ function App() {
   const [page, setPage] = useState<Page>((location.hash.slice(1) as Page) || 'dashboard');
   useEffect(() => { location.hash = page; }, [page]);
   if (!getToken()) return <Login />;
-  const View = { dashboard: Dashboard, pandits: Pandits, users: Users, sessions: Sessions, payments: Payments, payouts: Payouts, complaints: Complaints, pricing: Pricing, broadcast: Broadcast }[page];
+  const View = { dashboard: Dashboard, pandits: Pandits, users: Users, sessions: Sessions, payments: Payments, payouts: Payouts, complaints: Complaints, pricing: Pricing, broadcast: Broadcast, audit: Audit }[page];
   return (
     <div className="shell">
       <nav aria-label="Admin sections">

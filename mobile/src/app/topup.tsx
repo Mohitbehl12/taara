@@ -8,6 +8,7 @@ import { api, rupees } from '@/lib/api';
 import { useApp } from '@/lib/store';
 import { space, useTheme } from '@/lib/theme';
 import { Button, Screen, T } from '@/components/ui';
+import { errorMessage } from '@/lib/errors';
 
 interface Order { orderId: string; keyId: string | null; creditPaise: number; gstPaise: number; totalPaise: number; demo: boolean }
 
@@ -54,7 +55,7 @@ export default function Topup() {
         await api('/wallet/topup/confirm', { body: { orderId: o.orderId } });
         await done(true);
       } else setOrder(o);
-    } catch (e: any) { setBusy(false); Alert.alert(e.code === 'network' ? t('common.network_error') : t('common.error_generic')); }
+    } catch (e: any) { setBusy(false); Alert.alert(errorMessage(t, e)); }
   };
 
   if (order && user) {

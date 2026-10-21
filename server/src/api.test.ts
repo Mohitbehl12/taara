@@ -6,6 +6,7 @@ import { io as ioc, type Socket } from 'socket.io-client';
 
 process.env.OTP_DEV_CODE = '123456';
 process.env.ADMIN_PHONES = '+919999999999';
+process.env.PUBLIC_URL = 'http://localhost:4000';
 
 let base = '';
 let http: Server;
@@ -21,7 +22,18 @@ async function api(path: string, opts: { method?: string; token?: string; body?:
   if (!r.ok) throw Object.assign(new Error(`${r.status} ${JSON.stringify(j)}`), { status: r.status, body: j });
   return j;
 }
-const login = async (phone: string, deviceId?: string) => (await api('/auth/otp/verify', { body: { phone, code: '123456', deviceId } }));
+const TERMS = '2026-10-22';
+/** Logs in and (by default) records the 18+ / terms consent the app collects on first launch. */
+const login = async (phone: string, deviceId?: string, consent = true) => {
+  const r = await api('/auth/otp/verify', { body: { phone, code: '123456', deviceId } });
+  if (consent) await api('/me/consent', { token: r.token, body: { termsVersion: TERMS, ageConfirmed: true } });
+  return r;
+};
+const uploadJpeg = async (token: string, visibility: 'public' | 'private') => {
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200)]);
+  const r = await fetch(`${base}/uploads?visibility=${visibility}`, { method: 'POST', headers: { 'content-type': 'image/jpeg', authorization: `Bearer ${token}` }, body: jpeg });
+  return (await r.json()) as { url: string };
+};
 const sock = (token: string) => new Promise<Socket>((res, rej) => {
   const s = ioc(base, { auth: { token }, transports: ['websocket'] });
   s.on('connect', () => res(s)); s.on('connect_error', rej);
@@ -168,8 +180,8 @@ describe('user journey', () => {
     const u = await login('9811122233');
     await api('/pandit/apply', { token: u.token, body: {
       displayName: 'Pt. New Applicant', bio: 'Vedic astrologer', experienceYears: 5, specializations: ['vedic'], languages: ['hi', 'mai'], replyLanguage: 'hi',
-      chatRatePaise: 1200, voiceRatePaise: 1500, videoRatePaise: 2000,
-      verification: { fullName: 'New Applicant', address: 'Darbhanga, Bihar', idDocType: 'pan', idDocUrl: 'https://example.com/id.jpg' },
+      chatRatePaise: 1200, voiceRatePaise: 1500, videoRatePaise: 2000, acceptConduct: true,
+      verification: { fullName: 'New Applicant', address: 'Darbhanga, Bihar', idDocType: 'pan', idDocUrl: (await uploadJpeg(u.token, 'private')).url },
     } });
     const admin = await login('+919999999999');
     const pending = await api('/admin/pandits?status=pending', { token: admin.token });
@@ -181,8 +193,111 @@ describe('user journey', () => {
     expect((await api('/pandits?lang=mai')).some((p: { id: string }) => p.id === pending[0].id)).toBe(true);
   });
 
-  it('deletes the account', async () => {
+  it('exports the user\'s data (DPDP right to access)', async () => {
+    const data = await api('/me/export', { token });
+    expect(data.account.id).toBeTruthy();
+    expect(data.birthProfiles.length).toBeGreaterThan(0);
+    expect(data.consultations.length).toBeGreaterThan(0);
+  });
+
+  it('deletes the account and revokes its token', async () => {
     await api('/me', { method: 'DELETE', token });
-    await expect(api('/me', { token })).rejects.toMatchObject({ status: 403 });
+    await expect(api('/me', { token })).rejects.toMatchObject({ status: 401 });
+  });
+});
+
+describe('safety and compliance', () => {
+  it('requires terms + 18+ consent before paid or AI features', async () => {
+    const r = await login('9800011122', 'dev-c1', false);
+    expect(r.user.consentCurrent).toBe(false);
+    await expect(api('/wallet/topup', { token: r.token, body: { creditPaise: 10000 } })).rejects.toMatchObject({ status: 403 });
+    await expect(api('/me/consent', { token: r.token, body: { termsVersion: 'old', ageConfirmed: true } })).rejects.toMatchObject({ status: 400 });
+    const me = await api('/me/consent', { token: r.token, body: { termsVersion: TERMS, ageConfirmed: true } });
+    expect(me.consentCurrent).toBe(true);
+    expect(me.notificationPrefs.campaigns).toBe(false); // marketing is opt-in
+  });
+
+  it('refuses an under-18 own chart, but allows a parent to add a child\'s chart', async () => {
+    const r = await login('9800011133', 'dev-c2');
+    const y = new Date().getFullYear() - 15;
+    const teen = { name: 'Teen', relation: 'self', date: `${y}-01-01`, time: '10:00', timeAccuracy: 'exact', placeName: 'Delhi', lat: 28.61, lon: 77.21, isPrimary: true };
+    await expect(api('/profiles', { token: r.token, body: teen })).rejects.toMatchObject({ status: 403, body: { error: 'age_restricted' } });
+    // A parent can still add their child's chart.
+    await api('/profiles', { token: r.token, body: { ...teen, name: 'My son', relation: 'child', isPrimary: false } });
+  });
+
+  it('throttles OTP sends per phone', async () => {
+    await api('/auth/otp/send', { body: { phone: '9800011144' } });
+    await expect(api('/auth/otp/send', { body: { phone: '9800011144' } })).rejects.toMatchObject({ status: 429 });
+  });
+
+  it('masks phone numbers, UPI IDs and links in Pandit chats, but not dates', async () => {
+    const u = await login('9800011155', 'dev-c3');
+    const list = await api('/pandits?online=true', { token: u.token });
+    const pandit = list.find((p: { displayName: string }) => p.displayName.startsWith('Acharya Lakshmi'));
+    const pLogin = await login('+919000000001');
+    const s = await api('/sessions', { token: u.token, body: { kind: 'pandit', mode: 'chat', panditId: pandit.id } });
+    await api(`/pandit/sessions/${s.id}/respond`, { token: pLogin.token, body: { accept: true } });
+    const pSock = await sock(pLogin.token);
+    await pSock.emitWithAck('session:join', s.id);
+    const r = await pSock.emitWithAck('message:send', { sessionId: s.id, text: 'Call me on 98765 43210 or pay guru@okaxis. Born 15-08-1990 10:30?' });
+    expect(r.message.text).toBe('Call me on ••• or pay •••. Born 15-08-1990 10:30?');
+    await api(`/sessions/${s.id}/end`, { token: u.token, body: {} });
+    pSock.close();
+  });
+
+  it('lets a user block a Pandit, who then disappears and cannot be consulted', async () => {
+    const u = await login('9800011166', 'dev-c4');
+    const before = await api('/pandits', { token: u.token });
+    const target = before[0];
+    await api(`/blocks/${target.id}`, { method: 'PUT', token: u.token, body: {} });
+    const after = await api('/pandits', { token: u.token });
+    expect(after.some((p: { id: string }) => p.id === target.id)).toBe(false);
+    await expect(api('/sessions', { token: u.token, body: { kind: 'pandit', mode: 'chat', panditId: target.id } })).rejects.toMatchObject({ status: 403 });
+    await api(`/blocks/${target.id}`, { method: 'DELETE', token: u.token });
+  });
+
+  it('rejects files whose bytes do not match the declared type', async () => {
+    const u = await login('9800011177', 'dev-c5');
+    const r = await fetch(`${base}/uploads?visibility=public`, { method: 'POST', headers: { 'content-type': 'image/png', authorization: `Bearer ${u.token}` }, body: Buffer.from('<html>not an image</html>') });
+    expect(r.status).toBe(400);
+  });
+
+  it('log out of all devices invalidates existing tokens (REST and sockets)', async () => {
+    const u = await login('9800011188', 'dev-c6');
+    await api('/me/logout-all', { token: u.token, body: {} });
+    await expect(api('/me', { token: u.token })).rejects.toMatchObject({ status: 401 });
+    await expect(sock(u.token)).rejects.toBeTruthy();
+  });
+
+  it('acknowledges complaints with a reference number and records admin actions', async () => {
+    const u = await login('9800011199', 'dev-c7');
+    const c = await api('/complaints', { token: u.token, body: { category: 'other', text: 'Testing grievance flow' } });
+    expect(c.reference).toHaveLength(8);
+    const admin = await login('+919999999999');
+    await api(`/admin/complaints/${c.id}`, { token: admin.token, body: { status: 'resolved', resolution: 'ok' } });
+    await new Promise((r) => setTimeout(r, 50));
+    const audit = await api('/admin/audit', { token: admin.token });
+    expect(audit.some((a: { path: string }) => a.path.includes(c.id))).toBe(true);
+  });
+
+  it('stops charging and refunds an AI session when the care signal fires', async () => {
+    const { stripCare, waiveSession } = await import('./services/safety.js');
+    expect(stripCare('[[CARE]] Please call 14416.')).toEqual({ reply: 'Please call 14416.', care: true });
+    const u = await login('9800011100', 'dev-c8');
+    const { db, schema } = await import('./db/client.js');
+    const { eq } = await import('drizzle-orm');
+    await api('/wallet/topup/confirm', { token: u.token, body: { orderId: (await api('/wallet/topup', { token: u.token, body: { creditPaise: 10000 } })).orderId } });
+    const s = await api('/sessions', { token: u.token, body: { kind: 'ai', mode: 'chat' } });
+    await new Promise((r) => setTimeout(r, 1300));
+    await db().update(schema.sessions).set({ lastActivityAt: new Date() }).where(eq(schema.sessions.id, s.id));
+    await new Promise((r) => setTimeout(r, 600));
+    const mid = (await db().select().from(schema.sessions).where(eq(schema.sessions.id, s.id)))[0];
+    expect(mid.chargedPaise).toBeGreaterThan(0);
+    await waiveSession(s.id);
+    await new Promise((r) => setTimeout(r, 1200));
+    const w = await api('/wallet', { token: u.token });
+    expect(w.balancePaise).toBe(10000); // everything refunded, nothing more charged
+    await api(`/sessions/${s.id}/end`, { token: u.token, body: {} });
   });
 });

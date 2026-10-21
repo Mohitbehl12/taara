@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 import { useApp } from '@/lib/store';
 import { space, useTheme } from '@/lib/theme';
 import { Button, Field, Screen, T } from '@/components/ui';
+import { errorMessage } from '@/lib/errors';
 
 export default function Login() {
   const { t } = useTranslation();
@@ -28,7 +29,7 @@ export default function Login() {
       await api('/auth/otp/send', { body: { phone: digits } });
       router.push({ pathname: '/otp', params: { phone: digits } });
     } catch (e: any) {
-      setError(e.code === 'network' ? t('common.network_error') : t('common.error_generic'));
+      setError(errorMessage(t, e));
     } finally { setBusy(false); }
   };
 
@@ -73,6 +74,10 @@ export default function Login() {
           </>
         ) : null}
         <T v="tiny" color={c.inkSoft} style={{ textAlign: 'center' }}>{t('auth.terms')}</T>
+        <View style={{ flexDirection: 'row', justifyContent: 'center', gap: space.m }}>
+          <T v="tiny" color={c.primary} accessibilityRole="link" onPress={() => router.push({ pathname: '/legal/[doc]', params: { doc: 'terms' } })}>{t('profile.terms')}</T>
+          <T v="tiny" color={c.primary} accessibilityRole="link" onPress={() => router.push({ pathname: '/legal/[doc]', params: { doc: 'privacy' } })}>{t('profile.privacy_policy')}</T>
+        </View>
       </Screen>
     </KeyboardAvoidingView>
   );

@@ -25,6 +25,13 @@ export const users = pgTable('users', {
   notificationPrefs: jsonb('notification_prefs').$type<Record<string, boolean>>().notNull().default({}),
   aiProfileConsent: boolean('ai_profile_consent').notNull().default(true),
   blocked: boolean('blocked').notNull().default(false),
+  // Consent records (DPDP Act): what the user agreed to and when. Marketing is a separate, opt-in choice.
+  termsVersion: text('terms_version'),
+  termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }),
+  ageConfirmedAt: timestamp('age_confirmed_at', { withTimezone: true }),
+  marketingConsent: boolean('marketing_consent').notNull().default(false),
+  // Bumped on "log out of all devices" and on account deletion; tokens carry it and are rejected when stale.
+  tokenVersion: integer('token_version').notNull().default(0),
   createdAt: createdAt(),
 }, (t) => [
   uniqueIndex('users_phone_uq').on(t.phone),
@@ -58,7 +65,8 @@ export const pandits = pgTable('pandits', {
   specializations: jsonb('specializations').$type<string[]>().notNull().default([]),
   languages: jsonb('languages').$type<string[]>().notNull().default([]),
   replyLanguage: text('reply_language').notNull().default('hi'),
-  status: text('status').notNull().default('pending'), // pending | approved | rejected | suspended
+  status: text('status').notNull().default('pending'), // pending | approved | rejected | suspended | deleted
+  conductAcceptedAt: timestamp('conduct_accepted_at', { withTimezone: true }),
   chatRatePaise: integer('chat_rate_paise').notNull().default(2000),
   voiceRatePaise: integer('voice_rate_paise').notNull().default(2500),
   videoRatePaise: integer('video_rate_paise').notNull().default(3000),
@@ -119,6 +127,8 @@ export const sessions = pgTable('sessions', {
   consentDeadline: timestamp('consent_deadline', { withTimezone: true }),
   endedAt: timestamp('ended_at', { withTimezone: true }),
   endReason: text('end_reason'),
+  // Set when the AI detects a person in distress: no further charges, and charges so far are refunded.
+  billingWaived: boolean('billing_waived').notNull().default(false),
 }, (t) => [
   index('sessions_user_idx').on(t.userId, t.requestedAt),
   index('sessions_pandit_idx').on(t.panditId, t.requestedAt),
@@ -188,6 +198,9 @@ export const complaints = pgTable('complaints', {
   id: id(),
   userId: uuid('user_id').notNull().references(() => users.id),
   sessionId: uuid('session_id'),
+  messageId: uuid('message_id'),
+  reviewId: uuid('review_id'),
+  panditId: uuid('pandit_id'),
   category: text('category').notNull(),
   text: text('text').notNull(),
   status: text('status').notNull().default('open'),
@@ -228,6 +241,10 @@ export const otpCodes = pgTable('otp_codes', {
   codeHash: text('code_hash').notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   attempts: integer('attempts').notNull().default(0),
+  // Send throttling (SMS pumping / OTP bombing protection)
+  lastSentAt: timestamp('last_sent_at', { withTimezone: true }),
+  windowStartedAt: timestamp('window_started_at', { withTimezone: true }),
+  sendCount: integer('send_count').notNull().default(0),
 });
 
 export const notifications = pgTable('notifications', {
@@ -274,3 +291,26 @@ export const palmReadings = pgTable('palm_readings', {
   status: text('status').notNull().default('ready'), // ready | detailed_generating | failed
   createdAt: createdAt(),
 }, (t) => [index('palm_user_idx').on(t.userId, t.createdAt)]);
+
+/** A user can block a Pandit: the Pandit disappears from their lists and cannot be consulted again. */
+export const userBlocks = pgTable('user_blocks', {
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  panditId: uuid('pandit_id').notNull().references(() => pandits.id, { onDelete: 'cascade' }),
+  createdAt: createdAt(),
+}, (t) => [primaryKey({ columns: [t.userId, t.panditId] })]);
+
+/** Phones (hashed) that already received free minutes, so deleting and re-creating an account doesn't grant them again. */
+export const freeGrants = pgTable('free_grants', {
+  phoneHash: text('phone_hash').primaryKey(),
+  createdAt: createdAt(),
+});
+
+/** Every state-changing admin action, for accountability (money, approvals, blocks, settings). */
+export const adminAudit = pgTable('admin_audit', {
+  id: id(),
+  adminId: uuid('admin_id').notNull(),
+  method: text('method').notNull(),
+  path: text('path').notNull(),
+  body: jsonb('body').notNull().default({}),
+  createdAt: createdAt(),
+}, (t) => [index('admin_audit_created_idx').on(t.createdAt)]);

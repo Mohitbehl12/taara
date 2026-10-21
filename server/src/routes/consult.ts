@@ -9,6 +9,15 @@ import { speechToText, textToSpeech } from '../services/voice.js';
 import { track } from '../services/analytics.js';
 import { ownProfile } from './astro.js';
 import { own as ownPalm, palmContext } from '../services/palm.js';
+import { isBlocked, maskContacts, rateLimit, requireAdult, stripCare, waiveSession } from '../services/safety.js';
+import { authenticate } from '../lib/http.js';
+
+/** Reads the token if present (for public endpoints that personalise when signed in). */
+async function optionalUser(req: express.Request) {
+  const h = req.headers.authorization;
+  if (!h?.startsWith('Bearer ')) return null;
+  return authenticate(h.slice(7)).catch(() => null);
+}
 
 export const consultRoutes = Router();
 
@@ -29,8 +38,13 @@ consultRoutes.get('/pandits', handler({
     free: z.enum(['true', 'false']).optional(), sort: z.enum(['recommended', 'price_low', 'price_high', 'rating', 'experience']).default('recommended'),
     q: z.string().optional(),
   }),
-}, async ({ query }) => {
+}, async ({ query, req }) => {
   let rows = await db().select().from(schema.pandits).where(eq(schema.pandits.status, 'approved'));
+  const me = await optionalUser(req);
+  if (me) {
+    const blocked = new Set((await db().select({ id: schema.userBlocks.panditId }).from(schema.userBlocks).where(eq(schema.userBlocks.userId, me.id))).map((b) => b.id));
+    rows = rows.filter((p) => !blocked.has(p.id) && p.userId !== me.id);
+  }
   if (query.lang) rows = rows.filter((p) => p.languages.includes(query.lang!));
   if (query.specialty) rows = rows.filter((p) => p.specializations.includes(query.specialty!));
   if (query.online === 'true') rows = rows.filter((p) => p.online);
@@ -63,7 +77,7 @@ consultRoutes.get('/favorites', requireAuth, handler({}, async ({ user }) => {
   return rows.map(publicPandit);
 }));
 consultRoutes.put('/favorites/:panditId', requireAuth, handler({}, async ({ req, user }) => {
-  await db().insert(schema.favorites).values({ userId: user.id, panditId: String(req.params.panditId) }).onConflictDoNothing();
+  await db().insert(schema.favorites).values({ userId: user.id, panditId: z.string().uuid().parse(req.params.panditId) }).onConflictDoNothing();
 }));
 consultRoutes.delete('/favorites/:panditId', requireAuth, handler({}, async ({ req, user }) => {
   await db().delete(schema.favorites).where(and(eq(schema.favorites.userId, user.id), eq(schema.favorites.panditId, String(req.params.panditId))));
@@ -79,6 +93,13 @@ consultRoutes.post('/sessions', requireAuth, handler({
   if (body.profileId) await ownProfile(body.profileId, user.id);
   if (body.palmReadingId) await ownPalm(user.id, body.palmReadingId);
   if (body.kind === 'pandit' && body.mode !== 'chat') throw new HttpError(501, 'calls_coming_soon');
+  await requireAdult(user.id);
+  if (body.kind === 'pandit') {
+    if (!body.panditId) throw new HttpError(400, 'pandit_required');
+    if (await isBlocked(user.id, body.panditId)) throw new HttpError(403, 'pandit_blocked');
+    const [p] = await db().select({ userId: schema.pandits.userId }).from(schema.pandits).where(eq(schema.pandits.id, body.panditId));
+    if (p?.userId === user.id) throw new HttpError(400, 'cannot_consult_self');
+  }
   const s = await startSession({ userId: user.id, ...body });
   await track(user.id, body.kind === 'ai' ? 'ai_session_started' : 'pandit_session_requested', { mode: body.mode });
   return s;
@@ -118,7 +139,9 @@ consultRoutes.post('/sessions/:id/review', requireAuth, handler({
   if (!s || s.userId !== user.id || !s.panditId) throw new HttpError(404, 'session_not_found');
   if (s.status !== 'ended') throw new HttpError(409, 'session_not_ended');
   await db().transaction(async (tx) => {
-    await tx.insert(schema.reviews).values({ sessionId: s.id, userId: user.id, panditId: s.panditId!, rating: body.rating, text: body.text });
+    // Reviews are public: strip contact details and links.
+    const text = body.text ? maskContacts(body.text).text : undefined;
+    await tx.insert(schema.reviews).values({ sessionId: s.id, userId: user.id, panditId: s.panditId!, rating: body.rating, text });
     await tx.update(schema.pandits).set({
       ratingSum: sql`${schema.pandits.ratingSum} + ${body.rating}`, ratingCount: sql`${schema.pandits.ratingCount} + 1`,
     }).where(eq(schema.pandits.id, s.panditId!));
@@ -126,8 +149,41 @@ consultRoutes.post('/sessions/:id/review', requireAuth, handler({
 }));
 
 consultRoutes.post('/complaints', requireAuth, handler({
-  body: z.object({ sessionId: z.string().uuid().optional(), category: z.enum(['billing', 'pandit_behaviour', 'ai_answer', 'technical', 'other']), text: z.string().min(5).max(2000) }),
-}, async ({ body, user }) => { await db().insert(schema.complaints).values({ ...body, userId: user.id }); }));
+  body: z.object({
+    sessionId: z.string().uuid().optional(), messageId: z.string().uuid().optional(), reviewId: z.string().uuid().optional(),
+    panditId: z.string().uuid().optional(),
+    category: z.enum(['billing', 'pandit_behaviour', 'ai_answer', 'technical', 'abusive_message', 'fake_review', 'privacy', 'other']),
+    text: z.string().trim().min(5).max(2000),
+  }),
+}, async ({ body, user }) => {
+  rateLimit(`complaint:${user.id}`, 5, 5);
+  if (body.sessionId) await accessible(body.sessionId, user.id);
+  const [c] = await db().insert(schema.complaints).values({ ...body, userId: user.id }).returning();
+  // IT Rules 2021: complaints are acknowledged within 24 hours; we acknowledge instantly with a reference number.
+  return { id: c.id, reference: c.id.slice(0, 8).toUpperCase(), acknowledgedAt: c.createdAt };
+}));
+
+consultRoutes.get('/complaints', requireAuth, handler({}, async ({ user }) =>
+  db().select().from(schema.complaints).where(eq(schema.complaints.userId, user.id)).orderBy(desc(schema.complaints.createdAt)).limit(50)));
+
+// ---------- blocking (App Store 1.2 / Play UGC policy) ----------
+consultRoutes.get('/blocks', requireAuth, handler({}, async ({ user }) => {
+  const rows = await db().select({ id: schema.pandits.id, displayName: schema.pandits.displayName, photoUrl: schema.pandits.photoUrl })
+    .from(schema.userBlocks).innerJoin(schema.pandits, eq(schema.pandits.id, schema.userBlocks.panditId)).where(eq(schema.userBlocks.userId, user.id));
+  return rows;
+}));
+consultRoutes.put('/blocks/:panditId', requireAuth, handler({}, async ({ req, user }) => {
+  const panditId = z.string().uuid().parse(req.params.panditId);
+  await db().insert(schema.userBlocks).values({ userId: user.id, panditId }).onConflictDoNothing();
+  await db().delete(schema.favorites).where(and(eq(schema.favorites.userId, user.id), eq(schema.favorites.panditId, panditId)));
+  // End any open session with this Pandit right away.
+  const open = await db().select({ id: schema.sessions.id }).from(schema.sessions).where(and(eq(schema.sessions.userId, user.id), eq(schema.sessions.panditId, panditId),
+    inArray(schema.sessions.status, ['requested', 'active', 'awaiting_consent', 'paused'])));
+  for (const o of open) await endSession(o.id, user.id, 'blocked_by_user');
+}));
+consultRoutes.delete('/blocks/:panditId', requireAuth, handler({}, async ({ req, user }) => {
+  await db().delete(schema.userBlocks).where(and(eq(schema.userBlocks.userId, user.id), eq(schema.userBlocks.panditId, String(req.params.panditId))));
+}));
 
 /** AI voice turn: audio in → transcript → AI reply → speech out. Body is the raw audio (audio/m4a or audio/wav). */
 consultRoutes.post('/sessions/:id/voice', requireAuth, express.raw({ type: 'audio/*', limit: '8mb' }), handler({}, async ({ req, user }) => {
@@ -141,10 +197,12 @@ consultRoutes.post('/sessions/:id/voice', requireAuth, express.raw({ type: 'audi
   await recordActivity(s.id, 'user'); // resumes a paused session
   await db().insert(schema.messages).values({ sessionId: s.id, sender: 'user', text: transcript, lang: s.userLanguage });
   const chartText = await chartFor(s);
-  const reply = await aiReply({ sessionId: s.id, lang: s.userLanguage, chartText, voice: true });
+  rateLimit(`voice:${user.id}`, 12, 4);
+  const { reply, care } = stripCare(await aiReply({ sessionId: s.id, lang: s.userLanguage, chartText, voice: true }));
+  if (care) await waiveSession(s.id);
   const audioBase64 = await textToSpeech(reply, s.userLanguage).catch(() => null);
   const [m] = await db().insert(schema.messages).values({ sessionId: s.id, sender: 'ai', text: reply, lang: s.userLanguage }).returning();
-  return { transcript, reply, messageId: m.id, audioBase64, session: await publicSession(s.id) };
+  return { transcript, reply, messageId: m.id, audioBase64, care, session: await publicSession(s.id) };
 }));
 
 /** Everything the AI may know for this session: the birth chart (if the user allows it) and, for palm chats, the palm reading. */

@@ -64,7 +64,8 @@ async function generate(id: string, profile: typeof schema.birthProfiles.$inferS
     `Write a "${info.title}" for this person.\n${chartContext(profile)}${extra}\n
 Return strict JSON: {"summary": string, "sections": [{"title": string, "paragraphs": string[]}]} with these section titles in order: ${info.sections.join(' | ')}.
 Each section 2–4 short paragraphs. Ground every statement in the chart factors given. Plain language for beginners; mention the astrological reason in brackets once per section.
-No fear, no guaranteed outcomes, no medical/legal/investment advice. Remedies must be simple and free or low-cost.`,
+No fear, no guaranteed outcomes, no medical/legal/investment advice. Remedies must be simple and free or low-cost (no gemstones as a must, no paid rituals).
+Never predict death, lifespan, serious illness, accidents, divorce as certain, pregnancy, or the gender of a child. For marriage reports, never tell anyone not to marry because of a dosha; describe compatibility factors gently and suggest open conversation.`,
     { system: 'You are a senior Vedic astrologer writing a clear, kind, chart-grounded report. Output JSON only.', maxTokens: 4000 },
   );
   let body: { summary: string; sections: { title: string; paragraphs: string[] }[] };

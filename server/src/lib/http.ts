@@ -9,29 +9,34 @@ export class HttpError extends Error {
   constructor(public status: number, public code: string, message?: string) { super(message ?? code); }
 }
 
-export interface AuthUser { id: string; role: string }
+export interface AuthUser { id: string; role: string; tv?: number }
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express { interface Request { user?: AuthUser } }
 }
 
-export const signToken = (u: AuthUser) => jwt.sign({ sub: u.id, role: u.role }, env.jwtSecret, { expiresIn: '60d' });
+export const signToken = (u: AuthUser) => jwt.sign({ sub: u.id, role: u.role, tv: u.tv ?? 0 }, env.jwtSecret, { expiresIn: '60d', algorithm: 'HS256' });
 
 export function verifyToken(token: string): AuthUser {
-  const p = jwt.verify(token, env.jwtSecret) as { sub: string; role: string };
-  return { id: p.sub, role: p.role };
+  const p = jwt.verify(token, env.jwtSecret, { algorithms: ['HS256'] }) as { sub: string; role: string; tv?: number };
+  return { id: p.sub, role: p.role, tv: p.tv ?? 0 };
+}
+
+/** Verifies the token AND that the account still exists, isn't blocked, and the token hasn't been revoked. */
+export async function authenticate(token: string): Promise<AuthUser> {
+  const u = verifyToken(token);
+  const [row] = await db().select({ blocked: schema.users.blocked, role: schema.users.role, tv: schema.users.tokenVersion })
+    .from(schema.users).where(eq(schema.users.id, u.id));
+  if (!row || row.tv !== u.tv) throw new HttpError(401, 'unauthorized');
+  if (row.blocked) throw new HttpError(403, 'account_blocked');
+  return { id: u.id, role: row.role, tv: row.tv };
 }
 
 export const requireAuth: RequestHandler = async (req, _res, next) => {
   try {
     const h = req.headers.authorization;
     if (!h?.startsWith('Bearer ')) throw new HttpError(401, 'unauthorized');
-    const u = verifyToken(h.slice(7));
-    const [row] = await db().select({ blocked: schema.users.blocked, role: schema.users.role })
-      .from(schema.users).where(eq(schema.users.id, u.id));
-    if (!row) throw new HttpError(401, 'unauthorized');
-    if (row.blocked) throw new HttpError(403, 'account_blocked');
-    req.user = { id: u.id, role: row.role };
+    req.user = await authenticate(h.slice(7));
     next();
   } catch (e) {
     next(e instanceof HttpError ? e : new HttpError(401, 'unauthorized'));

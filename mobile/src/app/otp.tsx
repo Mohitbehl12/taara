@@ -7,6 +7,7 @@ import { useApp } from '@/lib/store';
 import { deviceId } from '@/lib/device';
 import { space, useTheme } from '@/lib/theme';
 import { Button, Field, Screen, T } from '@/components/ui';
+import { errorMessage } from '@/lib/errors';
 
 export default function Otp() {
   const { t } = useTranslation();
@@ -27,11 +28,11 @@ export default function Otp() {
       const r = await api<{ token: string }>('/auth/otp/verify', { body: { phone, code: value, deviceId: await deviceId() } });
       await signIn(r.token);
     } catch (e: any) {
-      setError(e.code === 'otp_expired' ? t('auth.otp_expired') : e.code === 'network' ? t('common.network_error') : t('auth.otp_invalid'));
+      setError(e.code === 'otp_expired' ? t('auth.otp_expired') : e.code === 'otp_invalid' ? t('auth.otp_invalid') : errorMessage(t, e));
     } finally { setBusy(false); }
   };
 
-  const resend = async () => { setWait(30); setError(null); try { await api('/auth/otp/send', { body: { phone } }); } catch { setError(t('common.error_generic')); } };
+  const resend = async () => { setWait(30); setError(null); try { await api('/auth/otp/send', { body: { phone } }); } catch (e: any) { setError(errorMessage(t, e)); } };
 
   return (
     <Screen style={{ paddingTop: space.xxl, gap: space.l }}>

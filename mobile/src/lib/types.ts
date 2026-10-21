@@ -19,6 +19,7 @@ export interface User {
   id: string; name: string | null; phone: string | null; email: string | null; gender: string | null; language: string;
   theme: 'light' | 'dark' | 'system'; goal: string | null; role: string; balancePaise: number; freeSecondsRemaining: number;
   notificationPrefs: Record<string, boolean>; aiProfileConsent: boolean;
+  consentCurrent: boolean; marketingConsent: boolean;
   pandit: { id: string; status: string } | null; profiles: BirthProfile[];
 }
 export interface Pandit {

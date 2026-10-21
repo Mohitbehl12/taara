@@ -10,6 +10,7 @@ import { space, type, useTheme } from '@/lib/theme';
 import type { Message, Pandit, Session } from '@/lib/types';
 import { RTL_LANGS } from '@/i18n';
 import { Badge, Button, Field, Loading, rtlText, Sheet, T } from '@/components/ui';
+import { CareCard, ReportSheet } from '@/components/Safety';
 import { BillingBar } from '@/components/BillingBar';
 import { Avatar } from '@/components/PanditRow';
 
@@ -31,6 +32,9 @@ export default function ChatScreen() {
   const [review, setReview] = useState({ open: false, rating: 0, text: '', sent: false });
   const [clientOpen, setClientOpen] = useState(false);
   const [client, setClient] = useState<any>(null);
+  const [care, setCare] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [report, setReport] = useState<{ messageId?: string } | null>(null);
   const firstSent = useRef(false);
   const listRef = useRef<FlatList<Message>>(null);
 
@@ -85,6 +89,8 @@ export default function ChatScreen() {
   }, [id, viewer]);
   useSocketEvent<{ sessionId: string; minutesLeft: number }>('free:warning', (e) => { if (e.sessionId === id) setBanner({ text: t('session.free_warning', { minutes: e.minutesLeft }) }); }, [id]);
   useSocketEvent<{ sessionId: string; minutesLeft: number }>('balance:low', (e) => { if (e.sessionId === id) setBanner({ text: t('session.low_balance', { minutes: e.minutesLeft }), action: 'topup' }); }, [id]);
+  useSocketEvent<{ sessionId: string }>('safety:care', (e) => { if (e.sessionId === id) setCare(true); }, [id]);
+  useSocketEvent<{ sessionId: string }>('message:masked', (e) => { if (e.sessionId === id) setBanner({ text: t('safety.masked') }); }, [id]);
   useSocketEvent<{ sessionId: string }>('free:ended', (e) => { if (e.sessionId === id) { setBanner(null); setS((p) => (p ? { ...p, status: 'awaiting_consent' } : p)); } }, [id]);
 
   const send = async (body = text) => {
@@ -140,6 +146,7 @@ export default function ChatScreen() {
         {s.kind === 'ai' ? <Badge text={t('common.ai_label')} tone="marigold" /> : null}
         {viewer === 'pandit' ? <Button title={t('pandit.client_details').split(' ')[0]} small kind="secondary" onPress={openClient} /> : null}
         {!closed && s.status !== 'requested' ? <Button title={t('session.end')} small kind="danger" onPress={end} /> : null}
+        <Pressable onPress={() => setMenu(true)} accessibilityRole="button" accessibilityLabel={t('safety.more')} hitSlop={12}><T v="h2">⋯</T></Pressable>
       </View>
       {s.status !== 'requested' && !closed ? <BillingBar s={s} viewer={viewer} /> : null}
       {s.status === 'paused' ? <View style={{ padding: space.m, backgroundColor: c.surfaceAlt }}><T v="small">{t('session.paused')}</T></View> : null}
@@ -178,7 +185,8 @@ export default function ChatScreen() {
               const shown = translated && !original ? translated : m.text;
               const rtl = RTL_LANGS.has(m.lang ?? s.userLanguage);
               return (
-                <View style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '86%' }}>
+                <Pressable style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '86%' }} disabled={mine}
+                  onLongPress={() => setReport({ messageId: m.id })} delayLongPress={400} accessibilityHint={mine ? undefined : t('safety.long_press_report')}>
                   <View style={{ backgroundColor: mine ? c.primary : c.surface, borderRadius: 18, borderBottomRightRadius: mine ? 4 : 18, borderBottomLeftRadius: mine ? 18 : 4,
                     paddingHorizontal: space.m, paddingVertical: space.s, borderWidth: mine ? 0 : 1, borderColor: c.line }}>
                     <T selectable color={mine ? c.onPrimary : c.ink} style={rtlText(rtl && !translated)}>{shown}</T>
@@ -188,11 +196,16 @@ export default function ChatScreen() {
                       <T v="tiny" color={c.primary} style={{ marginTop: 2 }}>{original ? t('session.show_translated') : `${t('session.translated')} · ${t('session.show_original')}`}</T>
                     </Pressable>
                   ) : null}
-                </View>
+                </Pressable>
               );
             }}
             ListFooterComponent={typing ? <T v="small" color={c.inkSoft} style={{ marginTop: space.s }}>{s.kind === 'ai' ? t('session.thinking') : '…'}</T> : undefined}
-            ListHeaderComponent={s.kind === 'ai' ? <T v="tiny" color={c.inkSoft} style={{ textAlign: 'center', marginBottom: space.s }}>{t('common.disclaimer')}</T> : undefined}
+            ListHeaderComponent={
+              <View style={{ gap: space.s, marginBottom: space.s }}>
+                {care ? <CareCard /> : null}
+                <T v="tiny" color={c.inkSoft} style={{ textAlign: 'center' }}>{s.kind === 'ai' ? t('common.disclaimer') : t('safety.chat_notice')}</T>
+              </View>
+            }
           />
           {closed ? (
             <View style={{ padding: space.l, gap: space.s, borderTopWidth: 1, borderTopColor: c.line }}>
@@ -219,6 +232,27 @@ export default function ChatScreen() {
           )}
         </KeyboardAvoidingView>
       )}
+
+      {/* Safety menu: report and block (App Store 1.2 / Play user-generated content policy). */}
+      <Sheet visible={menu} onClose={() => setMenu(false)}>
+        <View style={{ gap: space.s }}>
+          <Button title={s.kind === 'ai' ? t('safety.report_answer') : viewer === 'user' ? t('safety.report_pandit') : t('safety.report_user')} kind="secondary"
+            onPress={() => { setMenu(false); setReport({}); }} />
+          {s.kind === 'pandit' && viewer === 'user' && s.panditId ? (
+            <Button title={t('safety.block_pandit')} kind="danger" onPress={() => Alert.alert(t('safety.block_q', { name: otherName }), t('safety.block_body'), [
+              { text: t('common.cancel'), style: 'cancel' },
+              { text: t('safety.block'), style: 'destructive', onPress: async () => {
+                setMenu(false);
+                try { await api(`/blocks/${s.panditId}`, { method: 'PUT', body: {} }); router.back(); } catch { Alert.alert(t('common.error_generic')); }
+              } },
+            ])} />
+          ) : null}
+          <Button title={t('safety.title')} kind="ghost" onPress={() => { setMenu(false); router.push('/safety'); }} />
+        </View>
+      </Sheet>
+      <ReportSheet visible={!!report} onClose={() => setReport(null)}
+        context={{ sessionId: s.id, messageId: report?.messageId, panditId: s.panditId ?? undefined }}
+        categories={s.kind === 'ai' ? ['ai_answer', 'billing', 'technical', 'other'] : ['pandit_behaviour', 'abusive_message', 'billing', 'other']} />
 
       {/* Free time ended: explicit consent before any charge. */}
       <Sheet visible={s.status === 'awaiting_consent' && viewer === 'user'} onClose={() => {}}>

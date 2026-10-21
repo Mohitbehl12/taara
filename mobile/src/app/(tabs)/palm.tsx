@@ -8,6 +8,7 @@ import { useFetch } from '@/lib/useFetch';
 import { capturePalm, uploadPalm, type PalmReading } from '@/lib/palm';
 import { space, useTheme } from '@/lib/theme';
 import { Button, Row, Screen, Section, Segmented, T } from '@/components/ui';
+import { errorMessage } from '@/lib/errors';
 
 type Hand = 'left' | 'right' | 'both';
 
@@ -61,7 +62,7 @@ export default function PalmScreen() {
       if (e.code === 'camera_denied') Alert.alert(t('palm.camera_denied'), '', [{ text: 'Settings', onPress: () => Linking.openSettings() }, { text: t('common.cancel') }]);
       else if (e.code === 'palm_not_clear') Alert.alert(t('palm.not_clear'));
       else if (e.code === 'palm_daily_limit') Alert.alert(t('palm.limit'));
-      else Alert.alert(e.code === 'network' ? t('common.network_error') : t('common.error_generic'));
+      else Alert.alert(errorMessage(t, e));
     } finally { setBusy(null); }
   };
 

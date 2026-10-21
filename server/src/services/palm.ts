@@ -113,6 +113,7 @@ export async function buyDetailed(userId: string, id: string) {
   if (row.detailed) return publicReading(row);
   if (row.status === 'detailed_generating') throw new HttpError(409, 'already_generating');
   const price = (await allSettings())['palm.detailed_price_paise'];
+  if (!row.imagePath) throw new HttpError(410, 'palm_photo_expired'); // photo removed under the retention policy
   await db().transaction(async (tx) => {
     await moveUserMoney(tx, userId, -price, 'report_purchase', { note: `palm ${id}` });
     await platformEntry(tx, price, 'report_purchase', { note: `palm ${id}` });

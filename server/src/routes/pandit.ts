@@ -9,6 +9,11 @@ import { respondToRequest } from '../services/billing.js';
 import { movePanditMoney } from '../services/wallet.js';
 import { track } from '../services/analytics.js';
 import { publicPandit } from './consult.js';
+import { env } from '../config/env.js';
+import { requireAdult } from '../services/safety.js';
+
+/** Uploaded files must be ours (from POST /uploads), never arbitrary external links. */
+const ownUpload = z.string().url().refine((u) => u.startsWith(`${env.publicUrl}/`), 'must_be_uploaded_file');
 
 export const panditRoutes = Router();
 panditRoutes.use('/pandit', requireAuth);
@@ -36,20 +41,23 @@ panditRoutes.post('/pandit/apply', handler({
   body: z.object({
     displayName: z.string().min(2).max(80), bio: z.string().max(2000), experienceYears: z.number().int().min(0).max(70),
     specializations: z.array(z.enum(SPECIALTIES)).min(1), languages: z.array(lang).min(1), replyLanguage: lang,
-    photoUrl: z.string().url().optional(),
+    photoUrl: ownUpload.optional(),
     chatRatePaise: z.number().int(), voiceRatePaise: z.number().int(), videoRatePaise: z.number().int(),
+    acceptConduct: z.literal(true), // Pandit Code of Conduct must be accepted
     verification: z.object({
       fullName: z.string().min(2), email: z.string().email().optional(), address: z.string().min(5),
-      idDocType: z.enum(['aadhaar_masked', 'pan', 'passport', 'voter_id', 'driving_licence']), idDocUrl: z.string().url(),
-      certificateUrls: z.array(z.string().url()).max(10).default([]),
+      idDocType: z.enum(['aadhaar_masked', 'pan', 'passport', 'voter_id', 'driving_licence']), idDocUrl: ownUpload,
+      certificateUrls: z.array(ownUpload).max(10).default([]),
       payoutAccountRef: z.string().max(100).optional(), payoutAccountHint: z.string().max(20).optional(),
     }),
   }),
 }, async ({ body, user }) => {
   const [existing] = await db().select().from(schema.pandits).where(eq(schema.pandits.userId, user.id));
   if (existing && existing.status !== 'rejected') throw new HttpError(409, 'already_applied');
+  await requireAdult(user.id);
   await checkRates(body);
-  const { verification, ...profile } = body;
+  const { verification, acceptConduct: _ac, ...fields } = body;
+  const profile = { ...fields, conductAcceptedAt: new Date() };
   const p = await db().transaction(async (tx) => {
     const [row] = existing
       ? await tx.update(schema.pandits).set({ ...profile, status: 'pending' }).where(eq(schema.pandits.id, existing.id)).returning()
@@ -70,7 +78,7 @@ panditRoutes.get('/pandit/me', handler({}, async ({ user }) => {
 
 panditRoutes.patch('/pandit/me', handler({
   body: z.object({
-    bio: z.string().max(2000).optional(), photoUrl: z.string().url().nullable().optional(),
+    bio: z.string().max(2000).optional(), photoUrl: ownUpload.nullable().optional(),
     specializations: z.array(z.enum(SPECIALTIES)).min(1).optional(), languages: z.array(lang).min(1).optional(), replyLanguage: lang.optional(),
     chatRatePaise: z.number().int().optional(), voiceRatePaise: z.number().int().optional(), videoRatePaise: z.number().int().optional(),
     participatesInFree: z.boolean().optional(), weeklyAvailability: z.record(z.string(), z.array(slot)).optional(),
@@ -109,6 +117,8 @@ panditRoutes.get('/pandit/sessions/:id/client', handler({}, async ({ req, user }
   const p = await myPandit(user.id);
   const [s] = await db().select().from(schema.sessions).where(and(eq(schema.sessions.id, String(req.params.id)), eq(schema.sessions.panditId, p.id)));
   if (!s) throw new HttpError(404, 'session_not_found');
+  // Data minimisation: a Pandit sees shared birth details only during the consultation and for 7 days after.
+  if (s.endedAt && Date.now() - s.endedAt.getTime() > 7 * 86_400_000) return { profile: null, expired: true };
   if (!s.profileId) return { profile: null };
   const [bp] = await db().select().from(schema.birthProfiles).where(eq(schema.birthProfiles.id, s.profileId));
   return { profile: bp ? { name: bp.name, date: bp.date, time: bp.time, timeAccuracy: bp.timeAccuracy, placeName: bp.placeName, lat: bp.lat, lon: bp.lon, tzOffsetMinutes: bp.tzOffsetMinutes } : null };

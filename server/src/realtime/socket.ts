@@ -3,12 +3,13 @@ import { Server, type Socket } from 'socket.io';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, schema } from '../db/client.js';
-import { HttpError, verifyToken } from '../lib/http.js';
+import { authenticate, HttpError } from '../lib/http.js';
 import { billingEvents, publicSession, recordActivity, type BillingEvent } from '../services/billing.js';
 import { aiReply } from '../services/ai.js';
 import { translate } from '../services/translate.js';
 import { notify } from '../services/notify.js';
 import { accessible, chartFor } from '../routes/consult.js';
+import { maskContacts, rateLimit, stripCare, waiveSession } from '../services/safety.js';
 
 /**
  * Rooms: `user:<id>` (all devices of a user), `session:<id>` (both participants).
@@ -19,12 +20,11 @@ import { accessible, chartFor } from '../routes/consult.js';
 export function attachSockets(http: HttpServer, corsOrigin: string) {
   const io = new Server(http, { cors: { origin: corsOrigin === '*' ? true : corsOrigin.split(',') }, pingInterval: 20_000 });
 
+  // Same checks as the REST API: valid token, account exists, not blocked, token not revoked.
   io.use((socket, next) => {
-    try {
-      const token = String(socket.handshake.auth?.token ?? '');
-      socket.data.user = verifyToken(token);
-      next();
-    } catch { next(new Error('unauthorized')); }
+    authenticate(String(socket.handshake.auth?.token ?? ''))
+      .then((u) => { socket.data.user = u; next(); })
+      .catch(() => next(new Error('unauthorized')));
   });
 
   io.on('connection', (socket) => {
@@ -55,8 +55,14 @@ export function attachSockets(http: HttpServer, corsOrigin: string) {
 const sendSchema = z.object({ sessionId: z.string().uuid(), text: z.string().trim().min(1).max(2000), clientId: z.string().max(64).optional() });
 
 async function onMessage(io: Server, socket: Socket, userId: string, payload: unknown) {
-  const { sessionId, text, clientId } = sendSchema.parse(payload);
+  const parsed = sendSchema.parse(payload);
+  const { sessionId, clientId } = parsed;
+  rateLimit(`msg:${userId}`, 20, 8); // ~20 messages a minute, bursts of 8
   const s = await accessible(sessionId, userId);
+  if (s.status === 'ended' || s.status === 'rejected' || s.status === 'missed') throw new HttpError(409, 'session_closed');
+  // Pandit chats stay on-platform: phone numbers, emails, UPI IDs and links are masked in both directions.
+  const masked = s.kind === 'pandit' ? maskContacts(parsed.text) : { text: parsed.text, masked: false };
+  const text = masked.text;
   const sender: 'user' | 'pandit' = s.userId === userId ? 'user' : 'pandit';
   if (s.status === 'awaiting_consent') throw new HttpError(409, 'awaiting_consent');
   await recordActivity(sessionId, sender); // also resumes a paused AI chat and charges per-message mode
@@ -70,6 +76,7 @@ async function onMessage(io: Server, socket: Socket, userId: string, payload: un
   }
   const [m] = await db().insert(schema.messages).values({ sessionId, sender, text, lang }).returning();
   io.to(`session:${sessionId}`).emit('message:new', { ...m, clientId });
+  if (masked.masked) socket.emit('message:masked', { sessionId, id: m.id });
 
   // Translate for the other side when languages differ. The original is always kept and shown on toggle.
   if (s.kind === 'pandit' && otherLang !== lang) {
@@ -85,10 +92,15 @@ async function onMessage(io: Server, socket: Socket, userId: string, payload: un
     io.to(`session:${sessionId}`).emit('typing', { sessionId, userId: 'ai' });
     const chartText = await chartFor(s);
     const pendingId = `ai-${m.id}`;
-    const reply = await aiReply({
+    const raw = await aiReply({
       sessionId, lang: s.userLanguage, chartText, voice: false,
-      onDelta: (t) => io.to(`session:${sessionId}`).emit('ai:delta', { sessionId, pendingId, text: t }),
+      onDelta: careFilter((t) => io.to(`session:${sessionId}`).emit('ai:delta', { sessionId, pendingId, text: t })),
     });
+    const { reply, care } = stripCare(raw);
+    if (care) {
+      await waiveSession(sessionId);
+      io.to(`session:${sessionId}`).emit('safety:care', { sessionId });
+    }
     const [am] = await db().insert(schema.messages).values({ sessionId, sender: 'ai', text: reply, lang: s.userLanguage }).returning();
     io.to(`session:${sessionId}`).emit('message:new', { ...am, pendingId });
   }
@@ -123,3 +135,16 @@ async function route(io: Server, e: BillingEvent) {
 }
 
 const errCode = (e: unknown) => (e instanceof HttpError ? e.code : e instanceof z.ZodError ? 'invalid_input' : 'server_error');
+
+/** Holds back the first few streamed characters so the [[CARE]] marker (always at the start) never reaches the screen. */
+function careFilter(emit: (t: string) => void) {
+  let buf = ''; let open = true;
+  return (t: string) => {
+    if (!open) return emit(t);
+    buf += t;
+    if (buf.length < 8 && '[[CARE]]'.startsWith(buf.trimStart())) return;
+    open = false;
+    const out = buf.replace('[[CARE]]', '').replace(/^\s+/, '');
+    if (out) emit(out);
+  };
+}

@@ -5,6 +5,7 @@ import type { TFunction } from 'i18next';
 import { api, ApiError } from './api';
 import { useApp } from './store';
 import type { Session } from './types';
+import { errorMessage } from '@/lib/errors';
 
 /** Starts an AI or Pandit session and opens it. Handles "already open" and "add money" cases. */
 export async function startConsult(router: Router, t: TFunction, opts: {
@@ -27,7 +28,7 @@ export async function startConsult(router: Router, t: TFunction, opts: {
     } else if (err.code === 'calls_coming_soon') {
       Alert.alert(t('consult.calls_soon'));
     } else {
-      Alert.alert(err.code === 'network' ? t('common.network_error') : t('common.error_generic'));
+      Alert.alert(errorMessage(t, err));
     }
   }
 }

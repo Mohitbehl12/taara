@@ -109,6 +109,11 @@ export async function tick(sessionId: string, now = new Date()): Promise<Billing
   await db().transaction(async (tx) => {
     const [ss] = await tx.select().from(schema.sessions).where(eq(schema.sessions.id, sessionId)).for('update');
     if (!ss || !ACTIVE.includes(ss.status) || !ss.lastTickAt) return;
+    // A person in distress is never charged: the session continues for free.
+    if (ss.billingWaived) {
+      await tx.update(schema.sessions).set({ lastTickAt: now }).where(eq(schema.sessions.id, ss.id));
+      return;
+    }
     const user = await lockUser(tx, ss.userId);
 
     let billUntil = now;
@@ -250,13 +255,13 @@ export async function recordActivity(sessionId: string, actor: 'user' | 'pandit'
     if (!ss) throw new HttpError(404, 'session_not_found');
     if (ss.status === 'paused' && actor === 'user') {
       const user = await lockUser(tx, ss.userId);
-      if (user.balancePaise < Math.ceil(ss.ratePaise / 60)) throw new HttpError(402, 'insufficient_balance');
+      if (!ss.billingWaived && user.balancePaise < Math.ceil(ss.ratePaise / 60)) throw new HttpError(402, 'insufficient_balance');
       await tx.update(schema.sessions).set({ status: 'active', lastTickAt: now, lastActivityAt: now }).where(eq(schema.sessions.id, ss.id));
       resumed = true;
       return;
     }
     if (ss.status !== 'active') throw new HttpError(409, 'session_not_active');
-    if (ss.billingMode === 'per_message' && actor === 'user') {
+    if (ss.billingMode === 'per_message' && actor === 'user' && !ss.billingWaived) {
       await moveUserMoney(tx, ss.userId, -ss.ratePaise, 'session_charge', { sessionId: ss.id, note: 'per_message' });
       await platformEntry(tx, ss.ratePaise, 'session_charge', { sessionId: ss.id, note: 'ai per_message' });
       await tx.update(schema.sessions).set({ chargedPaise: ss.chargedPaise + ss.ratePaise, lastActivityAt: now })

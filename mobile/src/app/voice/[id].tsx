@@ -17,6 +17,7 @@ import type { Session } from '@/lib/types';
 import { LANGUAGES } from '@/i18n/languages';
 import { Badge, Button, T } from '@/components/ui';
 import { BillingBar } from '@/components/BillingBar';
+import { CareCard } from '@/components/Safety';
 
 const MAX_MS = 28_000; // speech-to-text accepts up to 30 s per turn
 
@@ -32,6 +33,7 @@ export default function VoiceScreen() {
   const [s, setS] = useState<Session | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [phase, setPhase] = useState<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
+  const [care, setCare] = useState(false);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const rec = useAudioRecorderState(recorder);
   const player = useRef<AudioPlayer | null>(null);
@@ -76,6 +78,7 @@ export default function VoiceScreen() {
       if (!r.ok) throw Object.assign(new Error(j.error), { code: j.error });
       if (!j.transcript) { setPhase('idle'); return; }
       setTurns((p) => [...p, { you: j.transcript, ai: j.reply }]);
+      if (j.care) setCare(true);
       if (j.session) setS(j.session);
       if (j.audioBase64) {
         const f = new File(Paths.cache, `reply-${Date.now()}.wav`);
@@ -112,6 +115,7 @@ export default function VoiceScreen() {
       ) : null}
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.l, gap: space.l }}>
+        {care ? <CareCard /> : null}
         {turns.map((tr, i) => (
           <View key={i} style={{ gap: space.s }}>
             <T v="small" color="rgba(255,244,220,0.7)">“{tr.you}”</T>

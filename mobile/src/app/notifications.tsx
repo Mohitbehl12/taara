@@ -25,7 +25,8 @@ export default function Notifications() {
         {KINDS.map(([k, label]) => (
           <View key={k} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: space.m, borderBottomWidth: 1, borderBottomColor: c.line }}>
             <T style={{ flex: 1 }}>{t(`profile.${label}`)}</T>
-            <Switch value={prefs[k] !== false} onValueChange={(v) => updateUser({ notificationPrefs: { ...prefs, [k]: v } })} trackColor={{ true: c.primary }} accessibilityLabel={t(`profile.${label}`)} />
+            {/* Marketing is opt-in (off until the user turns it on); service notifications are on by default. */}
+            <Switch value={k === 'campaigns' ? prefs[k] === true : prefs[k] !== false} onValueChange={(v) => updateUser({ notificationPrefs: { ...prefs, [k]: v } })} trackColor={{ true: c.primary, false: c.line }} thumbColor={c.surface} ios_backgroundColor={c.line} accessibilityLabel={t(`profile.${label}`)} />
           </View>
         ))}
       </Section>

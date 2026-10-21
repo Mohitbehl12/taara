@@ -1,5 +1,7 @@
 import React from 'react';
-import { Alert, Switch, View } from 'react-native';
+import { Alert, Platform, Switch, View } from 'react-native';
+import { File, Paths } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { api, rupees } from '@/lib/api';
@@ -17,6 +19,33 @@ export default function Profile() {
   if (!user) return null;
   const primary = user.profiles.find((p) => p.isPrimary);
   const pandit = user.pandit;
+
+  /** DPDP right to access: saves everything we hold as a JSON file the user can keep or share. */
+  const exportData = async () => {
+    try {
+      const data = await api('/me/export');
+      const json = JSON.stringify(data, null, 2);
+      const name = `taara-my-data-${new Date().toISOString().slice(0, 10)}.json`;
+      if (Platform.OS === 'web') {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+        a.download = name; a.click();
+        return;
+      }
+      const f = new File(Paths.cache, name);
+      f.create({ overwrite: true });
+      f.write(json);
+      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(f.uri, { mimeType: 'application/json' });
+    } catch { Alert.alert(t('common.error_generic')); }
+  };
+
+  const logoutAll = () => Alert.alert(t('privacy.logout_all'), t('privacy.logout_all_confirm'), [
+    { text: t('common.cancel'), style: 'cancel' },
+    { text: t('common.continue'), onPress: async () => {
+      try { await api('/me/logout-all', { body: {} }); } catch { /* signing out locally anyway */ }
+      disconnectSocket(); await signOut();
+    } },
+  ]);
 
   const del = () => Alert.alert(t('profile.delete_account'), t('profile.delete_confirm'), [
     { text: t('common.cancel'), style: 'cancel' },
@@ -56,8 +85,11 @@ export default function Profile() {
             <T>{t('profile.ai_consent')}</T>
             <T v="small" color={c.inkSoft}>{t('profile.ai_consent_hint')}</T>
           </View>
-          <Switch value={user.aiProfileConsent} onValueChange={(v) => updateUser({ aiProfileConsent: v })} trackColor={{ true: c.primary }} accessibilityLabel={t('profile.ai_consent')} />
+          <Switch value={user.aiProfileConsent} onValueChange={(v) => updateUser({ aiProfileConsent: v })} trackColor={{ true: c.primary, false: c.line }} thumbColor={c.surface} ios_backgroundColor={c.line} accessibilityLabel={t('profile.ai_consent')} />
         </View>
+        <Row title={t('privacy.download')} subtitle={t('privacy.download_hint')} onPress={exportData} />
+        <Row title={t('privacy.logout_all')} onPress={logoutAll} />
+        <Row title={t('profile.delete_account')} onPress={del} right={<View />} last />
       </Section>
 
       <Section title="Pandit Ji">
@@ -69,6 +101,7 @@ export default function Profile() {
       </Section>
 
       <Section>
+        <Row title={t('safety.title')} onPress={() => router.push('/safety')} />
         <Row title={t('profile.help')} onPress={() => router.push({ pathname: '/legal/[doc]', params: { doc: 'help' } })} />
         <Row title={t('profile.terms')} onPress={() => router.push({ pathname: '/legal/[doc]', params: { doc: 'terms' } })} />
         <Row title={t('profile.privacy_policy')} onPress={() => router.push({ pathname: '/legal/[doc]', params: { doc: 'privacy' } })} />
@@ -77,8 +110,7 @@ export default function Profile() {
       </Section>
 
       <Section>
-        <Row title={t('profile.logout')} onPress={async () => { disconnectSocket(); await signOut(); }} />
-        <Row title={t('profile.delete_account')} onPress={del} right={<View />} last />
+        <Row title={t('profile.logout')} onPress={async () => { disconnectSocket(); await signOut(); }} last />
       </Section>
     </Screen>
   );

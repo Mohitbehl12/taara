@@ -15,6 +15,13 @@
       "when": 1792589412723,
       "tag": "0001_palm_reading",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792607070496,
+      "tag": "0002_safety_compliance",
+      "breakpoints": true
     }
   ]
 }

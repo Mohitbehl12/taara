@@ -24,7 +24,9 @@ export default function RootLayout() {
   if (!ready || !booted) return <View style={{ flex: 1, backgroundColor: c.bg }}><Loading /></View>;
 
   const signedIn = !!token;
-  const onboarded = signedIn && (user?.profiles?.length ?? 0) > 0;
+  // Order after login: consent (terms, 18+) → onboarding (first birth chart) → app.
+  const consented = signedIn && !!user?.consentCurrent;
+  const onboarded = consented && (user?.profiles?.length ?? 0) > 0;
 
   return (
     <SafeAreaProvider>
@@ -40,9 +42,14 @@ export default function RootLayout() {
           <Stack.Screen name="login" />
           <Stack.Screen name="otp" />
         </Stack.Protected>
-        <Stack.Protected guard={signedIn && !onboarded}>
+        <Stack.Protected guard={signedIn && !consented}>
+          <Stack.Screen name="consent" />
+        </Stack.Protected>
+        <Stack.Protected guard={consented && !onboarded}>
           <Stack.Screen name="onboarding" />
         </Stack.Protected>
+        {/* Legal documents are readable by anyone, before or after sign-in. */}
+        <Stack.Screen name="legal/[doc]" options={{ headerShown: true, title: '' }} />
         <Stack.Protected guard={onboarded}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="chat/[id]" />
@@ -63,7 +70,7 @@ export default function RootLayout() {
           <Stack.Screen name="history" options={{ headerShown: true, title: '' }} />
           <Stack.Screen name="language" options={{ headerShown: true, title: '' }} />
           <Stack.Screen name="notifications" options={{ headerShown: true, title: '' }} />
-          <Stack.Screen name="legal/[doc]" options={{ headerShown: true, title: '' }} />
+          <Stack.Screen name="safety" options={{ headerShown: true, title: '' }} />
           <Stack.Screen name="pandit-apply" options={{ headerShown: true, title: '' }} />
           <Stack.Screen name="pandit-home" />
           <Stack.Screen name="pandit-settings" options={{ headerShown: true, title: '' }} />
