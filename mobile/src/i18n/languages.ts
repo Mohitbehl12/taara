@@ -1,0 +1,27 @@
+// Mirrors server/src/config/languages.ts so the picker works offline before /meta loads.
+export const LANGUAGES = [
+  { code: 'hi', english: 'Hindi', native: 'हिन्दी' },
+  { code: 'en', english: 'English', native: 'English' },
+  { code: 'bn', english: 'Bengali', native: 'বাংলা' },
+  { code: 'mr', english: 'Marathi', native: 'मराठी' },
+  { code: 'te', english: 'Telugu', native: 'తెలుగు' },
+  { code: 'ta', english: 'Tamil', native: 'தமிழ்' },
+  { code: 'gu', english: 'Gujarati', native: 'ગુજરાતી' },
+  { code: 'ur', english: 'Urdu', native: 'اردو' },
+  { code: 'kn', english: 'Kannada', native: 'ಕನ್ನಡ' },
+  { code: 'or', english: 'Odia', native: 'ଓଡ଼ିଆ' },
+  { code: 'ml', english: 'Malayalam', native: 'മലയാളം' },
+  { code: 'pa', english: 'Punjabi', native: 'ਪੰਜਾਬੀ' },
+  { code: 'as', english: 'Assamese', native: 'অসমীয়া' },
+  { code: 'mai', english: 'Maithili', native: 'मैथिली' },
+  { code: 'sat', english: 'Santali', native: 'ᱥᱟᱱᱛᱟᱲᱤ' },
+  { code: 'ks', english: 'Kashmiri', native: 'کٲشُر' },
+  { code: 'ne', english: 'Nepali', native: 'नेपाली' },
+  { code: 'kok', english: 'Konkani', native: 'कोंकणी' },
+  { code: 'sd', english: 'Sindhi', native: 'سنڌي' },
+  { code: 'doi', english: 'Dogri', native: 'डोगरी' },
+  { code: 'mni', english: 'Manipuri', native: 'মণিপুরী' },
+  { code: 'brx', english: 'Bodo', native: 'बड़ो' },
+  { code: 'sa', english: 'Sanskrit', native: 'संस्कृतम्' },
+];
+export const langName = (code: string) => LANGUAGES.find((l) => l.code === code)?.native ?? code;

@@ -1,0 +1,49 @@
+# Render Blueprint: API + admin panel (one web service) and a Postgres database.
+# Render dashboard → New → Blueprint → pick this repo. Fill the env vars marked sync:false afterwards.
+services:
+  - type: web
+    name: taara-api
+    runtime: node
+    plan: starter
+    region: singapore
+    buildCommand: cd admin && npm ci --include=dev && npm run build && cd ../server && npm ci --include=dev && npm run build
+    startCommand: cd server && node dist/db/migrate.js && npm start
+    healthCheckPath: /health
+    disk:
+      name: uploads
+      mountPath: /var/data
+      sizeGB: 5
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase: { name: taara-db, property: connectionString }
+      - key: JWT_SECRET
+        generateValue: true
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+      - key: ADMIN_DIST
+        value: ../admin/dist
+      - key: PUBLIC_URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: MSG91_AUTH_KEY
+        sync: false
+      - key: MSG91_TEMPLATE_ID
+        sync: false
+      - key: SARVAM_API_KEY
+        sync: false
+      - key: ADMIN_PHONES
+        sync: false
+
+databases:
+  - name: taara-db
+    plan: basic-256mb
+    region: singapore

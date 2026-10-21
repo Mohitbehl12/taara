@@ -1,0 +1,79 @@
+{
+  "expo": {
+    "name": "Taara",
+    "slug": "taara",
+    "scheme": "taara",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "in.taara.app",
+      "supportsTablet": false,
+      "usesAppleSignIn": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "in.taara.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#1C1610",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "RECORD_AUDIO",
+        "POST_NOTIFICATIONS"
+      ],
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Taara uses the microphone so you can speak your questions to the AI astrologer.",
+          "recordAudioAndroid": true
+        }
+      ],
+      "expo-sharing",
+      "expo-localization",
+      "expo-font",
+      "expo-apple-authentication",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Taara uses your location only to find your city for today's Panchang."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#F5B700"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Taara uses your photos so you can upload a palm photo, your profile picture or verification documents.",
+          "cameraPermission": "Taara uses the camera to take a photo of your palm for palm reading."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false
+    },
+    "extra": {
+      "apiUrl": "http://localhost:4000",
+      "eas": {
+        "projectId": ""
+      }
+    }
+  }
+}
