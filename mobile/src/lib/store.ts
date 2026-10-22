@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { storage } from './storage';
-import { api, setToken } from './api';
+import { api, setToken, setUnauthorizedHandler } from './api';
 import type { Meta, User } from './types';
 import { setLanguage } from '@/i18n';
 import { getLocales } from 'expo-localization';
@@ -58,6 +58,8 @@ export const useApp = create<AppState>((set, get) => ({
       setToken(token);
       set({ token });
       try { await get().refreshUser(); } catch { /* offline: keep token, screens will retry */ }
+      // Saved login was rejected (refreshUser signed out) — on the demo server, start a fresh guest account.
+      if (!get().token && (await metaP)?.demo) await get().demoSignIn().catch(() => {});
     } else {
       // Demo server: skip login entirely and open a fresh guest account.
       const meta = await metaP;
@@ -153,6 +155,15 @@ export const useApp = create<AppState>((set, get) => ({
 }));
 
 /** The Kundlis the person can see: their account's when signed in, otherwise the ones on this device. */
+// Saved login no longer valid (demo server reset by a deploy, or logged out elsewhere): sign out, and on the
+// demo server start a fresh guest account so the person can carry on without seeing an error.
+setUnauthorizedHandler(async () => {
+  const s = useApp.getState();
+  await s.signOut();
+  if (!s.meta?.demo) return false;
+  try { await s.demoSignIn(); return true; } catch { return false; }
+});
+
 const NONE: Kundli[] = [];
 export const useKundliList = () => useApp((s) => (s.token ? s.user?.profiles ?? NONE : s.localKundlis)) as Kundli[];
 export const usePrimaryKundli = () => {

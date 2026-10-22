@@ -5,6 +5,7 @@ export function errorMessage(t: TFunction, e: { code?: string } | null | undefin
   const code = e?.code ?? '';
   const known: Record<string, string> = {
     network: 'common.network_error',
+    server_starting: 'common.network_error',
     age_restricted: 'errors.age_restricted',
     age_not_confirmed: 'errors.terms',
     terms_not_accepted: 'errors.terms',
