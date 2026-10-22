@@ -90,7 +90,7 @@ export default function KundliScreen() {
                   ) : null}
                   {d.placements.map((p) => (
                     <View key={p.planet} style={{ flexDirection: 'row', paddingVertical: space.s, borderBottomWidth: 1, borderBottomColor: c.line }}>
-                      <T v="small" style={{ flex: 1.2, fontWeight: '600' }}>{t(`planets.${p.planet}`)}{p.retrograde && !['Rahu', 'Ketu'].includes(p.planet) ? ' ℞' : ''}</T>
+                      <T v="small" style={{ flex: 1.2, fontWeight: '600' }}>{t(`planets.${p.planet}`)}{p.retrograde && !['Rahu', 'Ketu'].includes(p.planet) ? ' (R)' : ''}</T>
                       <T v="small" style={{ flex: 1.4 }}>{t(`signs.${p.sign}`).split(' (')[0]}</T>
                       <T v="small" style={{ flex: 0.6 }}>{p.house}</T>
                       <T v="small" style={{ flex: 0.9, fontVariant: ['tabular-nums'] }}>{p.degreeInSign.toFixed(1)}°</T>

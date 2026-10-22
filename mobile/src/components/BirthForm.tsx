@@ -30,6 +30,29 @@ export function PickerField({ mode, value, onChange, placeholder }: { mode: 'dat
     ? mode === 'date' ? value.toLocaleDateString(i18n.language, { day: 'numeric', month: 'long', year: 'numeric' })
       : value.toLocaleTimeString(i18n.language, { hour: '2-digit', minute: '2-digit' })
     : placeholder;
+  if (Platform.OS === 'web') {
+    // The native picker library has no web version: use the browser's own date/time input.
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const v = value
+      ? mode === 'date' ? `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}` : `${pad(value.getHours())}:${pad(value.getMinutes())}`
+      : '';
+    const today = new Date();
+    return React.createElement('input', {
+      type: mode, value: v, 'aria-label': placeholder,
+      max: mode === 'date' ? `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}` : undefined,
+      min: mode === 'date' ? '1900-01-01' : undefined,
+      onChange: (e: { target: { value: string } }) => {
+        const s = e.target.value;
+        if (!s) return;
+        if (mode === 'date') { const [y, m, d] = s.split('-').map(Number); if (y >= 1900) onChange(new Date(y, m - 1, d)); }
+        else { const [h, mi] = s.split(':').map(Number); onChange(new Date(2000, 0, 1, h, mi)); }
+      },
+      style: {
+        minHeight: 56, borderRadius: 12, border: `1px solid ${c.line}`, background: c.surface, color: c.ink, padding: '0 16px',
+        fontSize: 20, fontFamily: 'inherit', width: '100%', boxSizing: 'border-box', colorScheme: dark ? 'dark' : 'light',
+      },
+    });
+  }
   if (Platform.OS === 'ios') {
     return (
       <View style={{ alignItems: 'center' }}>

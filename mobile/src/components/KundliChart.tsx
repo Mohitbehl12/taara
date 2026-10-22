@@ -38,7 +38,7 @@ export function KundliChart({ planets, referenceSign, style = 'north', size, lin
   const S = size;
   const sw = Math.max(1, S / 220);
   const fs = Math.max(10, S / 22);
-  const label = (p: ChartPlanet) => `${abbr(t(`planets.${p.planet}`))}${p.retrograde && p.planet !== 'Rahu' && p.planet !== 'Ketu' ? '℞' : ''}`;
+  const label = (p: ChartPlanet) => `${abbr(t(`planets.${p.planet}`))}${p.retrograde && p.planet !== 'Rahu' && p.planet !== 'Ketu' ? '(R)' : ''}`;
 
   if (style === 'south') {
     const cell = S / 4;
