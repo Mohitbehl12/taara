@@ -1,23 +1,25 @@
 import React from 'react';
 import { View } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { useApp } from '@/lib/store';
-import { useFetch } from '@/lib/useFetch';
+import { useKundliData } from '@/lib/kundlis';
+import { KundliChips, MakeKundliInline, useKundliChoice } from '@/components/Gates';
 import { space, useTheme } from '@/lib/theme';
 import { Badge, ErrorState, Loading, Screen, T } from '@/components/ui';
 
 interface Res { moonSign: number; transits: { planet: string; sign: number; house: number; favourable: boolean }[] }
 
 export default function Gochar() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { c } = useTheme();
-  const pid = useApp((s) => s.user?.profiles.find((p) => p.isPrimary)?.id);
-  const r = useFetch<Res>(pid ? `/tools/gochar?profileId=${pid}` : null);
+  const { list, k, setId } = useKundliChoice();
+  const r = useKundliData<Res>(k, 'gochar', i18n.language);
+  if (!k) return <Screen edges={[]} style={{ paddingTop: space.m, gap: space.l }}><T v="h1">{t('gochar.title')}</T><MakeKundliInline /></Screen>;
   if (r.error) return <ErrorState message={t('common.network_error')} onRetry={r.reload} />;
   if (!r.data) return <Loading />;
   return (
     <Screen edges={[]} style={{ paddingTop: space.m }}>
       <T v="h1">{t('gochar.title')}</T>
+      <View style={{ marginTop: space.s }}><KundliChips list={list} value={k} onChange={setId} /></View>
       <T color={c.inkSoft} style={{ marginTop: space.s }}>{t('gochar.subtitle', { sign: t(`signs.${r.data.moonSign}`) })}</T>
       <View style={{ marginTop: space.l }}>
         {r.data.transits.map((tr) => (

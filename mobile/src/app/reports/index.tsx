@@ -7,11 +7,12 @@ import { useApp } from '@/lib/store';
 import { useFetch } from '@/lib/useFetch';
 import { space, useTheme } from '@/lib/theme';
 import { Button, Chip, Row, Screen, Section, Sheet, T } from '@/components/ui';
+import { LoginGate, useSignedIn } from '@/components/Gates';
 
 interface Catalog { kind: string; title: string; sections: string[]; pricePaise: number }
 interface Mine { id: string; kind: string; status: string; createdAt: string }
 
-export default function Reports() {
+function ReportsScreen() {
   const { t, i18n } = useTranslation();
   const { c } = useTheme();
   const router = useRouter();
@@ -75,4 +76,9 @@ export default function Reports() {
       </Sheet>
     </Screen>
   );
+}
+
+/** Needs an account; guests see a short explanation and a login button. */
+export default function Reports() {
+  return useSignedIn() ? <ReportsScreen /> : <LoginGate next="/reports" icon="📄" />;
 }

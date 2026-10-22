@@ -23,10 +23,10 @@ export default function RootLayout() {
 
   if (!ready || !booted) return <View style={{ flex: 1, backgroundColor: c.bg }}><Loading /></View>;
 
+  // Guest-first, like AstroSage: everything free is open without an account. Login is asked for only
+  // when a screen needs it (chat, AI, wallet, palm reading, reports) — see useRequireLogin().
   const signedIn = !!token;
-  // Order after login: consent (terms, 18+) → onboarding (first birth chart) → app.
-  const consented = signedIn && !!user?.consentCurrent;
-  const onboarded = consented && (user?.profiles?.length ?? 0) > 0;
+  void user;
 
   return (
     <SafeAreaProvider>
@@ -37,23 +37,21 @@ export default function RootLayout() {
         headerTransparent: false, headerStyle: { backgroundColor: c.bg }, headerTintColor: c.ink, headerShadowVisible: false,
       }}>
         <Stack.Screen name="index" />
+        <Stack.Screen name="welcome" />
         <Stack.Protected guard={!signedIn}>
-          <Stack.Screen name="welcome" />
-          <Stack.Screen name="login" />
-          <Stack.Screen name="otp" />
+          <Stack.Screen name="login" options={{ headerShown: true, title: '' }} />
+          <Stack.Screen name="otp" options={{ headerShown: true, title: '' }} />
         </Stack.Protected>
-        <Stack.Protected guard={signedIn && !consented}>
-          <Stack.Screen name="consent" />
+        <Stack.Protected guard={signedIn}>
+          <Stack.Screen name="consent" options={{ headerShown: true, title: '' }} />
         </Stack.Protected>
-        <Stack.Protected guard={consented && !onboarded}>
-          <Stack.Screen name="onboarding" />
-        </Stack.Protected>
-        {/* Legal documents are readable by anyone, before or after sign-in. */}
         <Stack.Screen name="legal/[doc]" options={{ headerShown: true, title: '' }} />
-        <Stack.Protected guard={onboarded}>
+        <Stack.Screen name="kundli/new" options={{ headerShown: true, title: '' }} />
+        <Stack.Screen name="tools/panchang" options={{ headerShown: true, title: '' }} />
+        <Stack.Protected guard={true}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="chat/[id]" />
-          <Stack.Screen name="kundli" options={{ headerShown: true, title: '' }} />
+          <Stack.Screen name="kundli/[id]" options={{ headerShown: true, title: '' }} />
           <Stack.Screen name="tools/sade-sati" options={{ headerShown: true, title: '' }} />
           <Stack.Screen name="tools/gochar" options={{ headerShown: true, title: '' }} />
           <Stack.Screen name="tools/choghadiya" options={{ headerShown: true, title: '' }} />
@@ -64,7 +62,6 @@ export default function RootLayout() {
           <Stack.Screen name="wallet" options={{ headerShown: true, title: '' }} />
           <Stack.Screen name="topup" options={{ presentation: 'modal' }} />
           <Stack.Screen name="match" options={{ headerShown: true, title: '' }} />
-          <Stack.Screen name="profiles/new" options={{ headerShown: true, title: '' }} />
           <Stack.Screen name="reports/index" options={{ headerShown: true, title: '' }} />
           <Stack.Screen name="reports/[id]" options={{ headerShown: true, title: '' }} />
           <Stack.Screen name="history" options={{ headerShown: true, title: '' }} />

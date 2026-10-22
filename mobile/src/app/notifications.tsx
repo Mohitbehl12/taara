@@ -6,11 +6,12 @@ import { useApp } from '@/lib/store';
 import { useFetch } from '@/lib/useFetch';
 import { space, useTheme } from '@/lib/theme';
 import { Screen, Section, T } from '@/components/ui';
+import { LoginGate, useSignedIn } from '@/components/Gates';
 
 const KINDS = [['daily_horoscope', 'notif_daily'], ['consultation', 'notif_consultation'], ['payment', 'notif_payment'], ['campaigns', 'notif_campaigns']] as const;
 interface Notif { id: string; title: string; body: string; createdAt: string; readAt: string | null }
 
-export default function Notifications() {
+function NotificationsScreen() {
   const { t, i18n } = useTranslation();
   const { c } = useTheme();
   const { user, updateUser } = useApp();
@@ -41,4 +42,9 @@ export default function Notifications() {
       </Section>
     </Screen>
   );
+}
+
+/** Needs an account; guests see a short explanation and a login button. */
+export default function Notifications() {
+  return useSignedIn() ? <NotificationsScreen /> : <LoginGate next="/notifications" icon="🔔" />;
 }

@@ -1,162 +1,225 @@
-import React from 'react';
-import { Pressable, RefreshControl, ScrollView, useWindowDimensions, View } from 'react-native';
+// Home, laid out like AstroSage: big service tiles first, then "talk to an astrologer", astrologers online,
+// today's Rashifal for all 12 signs, Panchang, and your saved Kundlis. Everything here works without login.
+import React, { useState } from 'react';
+import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
-import { useApp } from '@/lib/store';
+import { useApp, useKundliList, usePrimaryKundli } from '@/lib/store';
 import { useFetch } from '@/lib/useFetch';
+import { useKundliData } from '@/lib/kundlis';
 import { rupees } from '@/lib/api';
 import { space, useTheme } from '@/lib/theme';
-import type { Horoscope } from '@/lib/types';
-import { Button, ErrorState, Screen, Section, Skeleton, T } from '@/components/ui';
-import { KundliChart } from '@/components/KundliChart';
-import { EnergyBars } from '@/components/EnergyBars';
+import type { Horoscope, Pandit } from '@/lib/types';
+import { langName } from '@/i18n/languages';
+import { Button, Row, Screen, Section, Skeleton, T } from '@/components/ui';
+import { Avatar } from '@/components/PanditRow';
+import { StartPanditSheet } from '@/components/StartPanditSheet';
+import { useRequireLogin } from '@/lib/auth';
 
 interface Home {
-  profile: { id: string; name: string; timeKnown: boolean } | null;
   basics: { rashi: number; sunSign: number; lagna: number | null; nakshatra: number; pada: number };
-  energy: Horoscope['energy'];
   horoscope: Horoscope;
-  panchang: { tithi: { name: string; paksha: string }; nakshatra: { index: number; name: string }; sunrise: string | null; sunset: string | null; rahuKaal: { start: string; end: string } | null; vara: string };
 }
-interface Kundli { chart: { referenceSign: number; planets: { planet: string; sign: number; house: number; retrograde: boolean }[] } }
+interface Panchang { tithi: { name: string; paksha: string }; nakshatra: { index: number }; sunrise: string | null; sunset: string | null; rahuKaal: { start: string; end: string } | null; vara: string }
 
-const clock = (iso: string | null | undefined, lang: string) => (iso ? new Date(iso).toLocaleTimeString(lang, { hour: 'numeric', minute: '2-digit' }) : '—');
+const GLYPHS = ['♈', '♉', '♊', '♋', '♌', '♍', '♎', '♏', '♐', '♑', '♒', '♓'].map((g) => `${g}︎`);
+const todayIST = () => new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
 
 export default function HomeScreen() {
   const { t, i18n } = useTranslation();
   const { c } = useTheme();
   const router = useRouter();
-  const { width } = useWindowDimensions();
-  const user = useApp((s) => s.user);
-  const meta = useApp((s) => s.meta);
+  const ensure = useRequireLogin();
+  const { user, meta, token, language } = useApp();
   const lang = i18n.language;
-  const home = useFetch<Home>(`/home?lang=${lang}`);
-  const primary = user?.profiles.find((p) => p.isPrimary) ?? user?.profiles[0];
-  const kundli = useFetch<Kundli>(primary ? `/profiles/${primary.id}/kundli?lang=${lang}` : null);
-  const h = home.data;
-  const freeMin = Math.floor((user?.freeSecondsRemaining ?? 0) / 60);
-  const chartSize = Math.min(width - space.l * 4, 300);
+  const list = useKundliList();
+  const primary = usePrimaryKundli();
+  const home = useKundliData<Home>(primary, 'home', lang);
+  const place = primary ? { lat: primary.lat, lon: primary.lon, name: primary.placeName } : { lat: 28.6139, lon: 77.209, name: 'New Delhi' };
+  const pan = useFetch<Panchang>(`/panchang?date=${todayIST()}&lat=${place.lat}&lon=${place.lon}&tz=330`);
+  const pandits = useFetch<Pandit[]>('/pandits?sort=recommended');
+  const [chosen, setChosen] = useState<Pandit | null>(null);
+  const freeMin = token ? Math.floor((user?.freeSecondsRemaining ?? 0) / 60) : meta?.pricing.freePanditMinutes ?? 60;
+  const clock = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleTimeString(lang, { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }) : '—');
+  const tr = (key: string, fallback: string) => { const v = t(key); return v === key ? fallback : v; };
+
+  const tiles: { icon: string; label: string; go: () => void }[] = [
+    { icon: '📜', label: t('home.q_kundli'), go: () => router.push('/(tabs)/kundli') },
+    { icon: '💞', label: t('home.q_match'), go: () => router.push('/match') },
+    { icon: '☀️', label: t('home.q_horoscope'), go: () => router.push('/(tabs)/horoscope') },
+    { icon: '✋', label: t('home.q_palm'), go: () => router.push('/(tabs)/palm') },
+    { icon: '📅', label: t('home.q_panchang'), go: () => router.push('/tools/panchang') },
+    { icon: '🤖', label: t('home.q_ai'), go: () => router.push({ pathname: '/(tabs)/consult', params: { tab: 'ai' } }) },
+    { icon: '🪐', label: t('home.q_sade_sati'), go: () => router.push('/tools/sade-sati') },
+    { icon: '🔢', label: t('home.q_numerology'), go: () => router.push('/tools/numerology') },
+  ];
+
+  const chat = (p: Pandit) => { if (ensure('/(tabs)/consult?tab=pandit')) setChosen(p); };
+  const online = (pandits.data ?? []).slice(0, 8);
 
   return (
-    <Screen refreshControl={<RefreshControl refreshing={home.loading && !!h} onRefresh={() => { home.reload(); kundli.reload(); useApp.getState().refreshUser(); }} />}>
-      <View style={{ paddingTop: space.l, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <T v="h1" style={{ flex: 1 }} numberOfLines={1}>{t('home.greeting_morning', { name: (user?.name ?? '').split(' ')[0] })}</T>
-        <Pressable onPress={() => router.push('/wallet')} accessibilityRole="button" accessibilityLabel={t('wallet.title')}
-          style={{ paddingHorizontal: space.m, minHeight: 36, borderRadius: 18, backgroundColor: c.surface, borderWidth: 1, borderColor: c.line, justifyContent: 'center' }}>
-          <T v="small" style={{ fontWeight: '600' }}>{rupees(user?.balancePaise ?? 0)}</T>
+    <Screen refreshControl={<RefreshControl refreshing={false} onRefresh={() => { home.reload(); pan.reload(); pandits.reload(); if (token) useApp.getState().refreshUser().catch(() => {}); }} />}>
+      {/* Header: name, language, wallet or login */}
+      <View style={{ paddingTop: space.l, flexDirection: 'row', alignItems: 'center', gap: space.s }}>
+        <View style={{ flex: 1 }}>
+          <T style={{ fontSize: 24, lineHeight: 30, fontWeight: '800' }} color={c.primary}>Taara</T>
+          <T v="small" color={c.inkSoft} numberOfLines={1}>{user?.name && token ? t('home.greeting_morning', { name: user.name.split(' ')[0] }) : t('home.hello_guest')}</T>
+        </View>
+        <Pressable onPress={() => router.push('/language')} accessibilityRole="button" accessibilityLabel={t('profile.language')}
+          style={{ paddingHorizontal: space.m, minHeight: 36, borderRadius: 18, borderWidth: 1, borderColor: c.line, backgroundColor: c.surface, justifyContent: 'center' }}>
+          <T v="small" style={{ fontWeight: '600' }}>🌐 {langName(language)}</T>
         </Pressable>
+        {token ? (
+          <Pressable onPress={() => router.push('/wallet')} accessibilityRole="button" accessibilityLabel={t('wallet.title')}
+            style={{ paddingHorizontal: space.m, minHeight: 36, borderRadius: 18, backgroundColor: c.marigold, justifyContent: 'center' }}>
+            <T v="small" color={c.marigoldInk} style={{ fontWeight: '700' }}>{rupees(user?.balancePaise ?? 0)}</T>
+          </Pressable>
+        ) : (
+          <Pressable onPress={() => router.push('/login')} accessibilityRole="button"
+            style={{ paddingHorizontal: space.m, minHeight: 36, borderRadius: 18, backgroundColor: c.primary, justifyContent: 'center' }}>
+            <T v="small" color={c.onPrimary} style={{ fontWeight: '700' }}>{t('more.login')}</T>
+          </Pressable>
+        )}
       </View>
 
-      {/* The hero: the user's own chart, drawn on the night sky. */}
-      <Pressable onPress={() => router.push('/kundli')} accessibilityRole="button" accessibilityLabel={t('home.view_kundli')}
-        style={{ marginTop: space.l, backgroundColor: c.sky, borderRadius: 28, padding: space.l, gap: space.l }}>
-        <T v="small" color={c.marigold} style={{ fontWeight: '600' }}>{t('home.your_sky')}</T>
-        <View style={{ alignItems: 'center' }}>
-          {kundli.data
-            ? <KundliChart size={chartSize} planets={kundli.data.chart.planets} referenceSign={kundli.data.chart.referenceSign}
-              line={c.marigold} ink={c.skyInk} muted="rgba(255,244,220,0.45)" accent={c.marigold} />
-            : <Skeleton h={chartSize} w={chartSize} r={12} style={{ opacity: 0.2 }} />}
+      {/* Service tiles: 4 × 2, round icons with labels underneath */}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: space.l, rowGap: space.l }}>
+        {tiles.map((a) => (
+          <Pressable key={a.label} onPress={a.go} accessibilityRole="button" accessibilityLabel={a.label}
+            style={({ pressed }) => ({ width: '25%', alignItems: 'center', gap: 6, opacity: pressed ? 0.7 : 1 })}>
+            <View style={{ width: 58, height: 58, borderRadius: 29, backgroundColor: c.surface, borderWidth: 1, borderColor: c.marigold, alignItems: 'center', justifyContent: 'center' }}>
+              <T style={{ fontSize: 26, lineHeight: 32 }}>{a.icon}</T>
+            </View>
+            <T v="tiny" style={{ fontWeight: '600', textAlign: 'center' }} numberOfLines={2}>{a.label}</T>
+          </Pressable>
+        ))}
+      </View>
+
+      {/* Talk to an astrologer banner */}
+      <Pressable onPress={() => router.push({ pathname: '/(tabs)/consult', params: { tab: 'pandit' } })} accessibilityRole="button"
+        style={({ pressed }) => ({ marginTop: space.xl, backgroundColor: c.primary, borderRadius: 20, padding: space.l, flexDirection: 'row', alignItems: 'center', gap: space.m, opacity: pressed ? 0.9 : 1 })}>
+        <T style={{ fontSize: 34, lineHeight: 40 }}>🧘</T>
+        <View style={{ flex: 1, gap: 2 }}>
+          <T color={c.onPrimary} style={{ fontWeight: '800', fontSize: 17 }}>{t('home.talk_banner')}</T>
+          <T v="small" color={c.onPrimary} style={{ opacity: 0.9 }}>{freeMin > 0 ? t('home.talk_banner_sub_free', { minutes: freeMin }) : t('home.talk_banner_sub')}</T>
         </View>
-        {h?.basics ? (
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-            {[
-              [t('home.rashi'), t(`signs.${h.basics.rashi}`)],
-              [t('home.nakshatra'), `${t(`nakshatras.${h.basics.nakshatra}`)} ${h.basics.pada}`],
-              [t('home.lagna'), h.basics.lagna !== null ? t(`signs.${h.basics.lagna}`) : t('home.lagna_unknown')],
-            ].map(([k, v]) => (
-              <View key={k} style={{ flex: 1 }}>
-                <T v="tiny" color="rgba(255,244,220,0.7)">{k}</T>
-                <T v="small" color={c.skyInk} style={{ fontWeight: '600' }} numberOfLines={2}>{v}</T>
-              </View>
-            ))}
-          </View>
-        ) : null}
+        <View style={{ backgroundColor: c.onPrimary, borderRadius: 16, paddingHorizontal: space.m, paddingVertical: 6 }}>
+          <T v="small" color={c.primary} style={{ fontWeight: '800' }}>{t('home.chat_now')}</T>
+        </View>
       </Pressable>
 
-      {/* Four primary actions, prices up front. Pandit Ji is the strongest (kesari) tile. */}
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.s, marginTop: space.l }}>
-        {[
-          { key: 'palm', icon: '✋', title: t('home.read_palm'), sub: t('home.read_palm_sub'), onPress: () => router.push('/(tabs)/palm'), tone: 'plain' },
-          { key: 'kundli', icon: '🔮', title: t('home.my_kundli'), sub: t('home.my_kundli_sub'), onPress: () => router.push('/kundli'), tone: 'plain' },
-          { key: 'ai', icon: '🤖', title: t('home.ask_ai'), sub: meta ? t('common.per_min', { price: rupees(meta.pricing.aiRatePerMinPaise) }) : t('home.ask_ai_sub'), onPress: () => router.push('/(tabs)/consult'), tone: 'gold' },
-          { key: 'pandit', icon: '🧘', title: t('home.talk_pandit'), sub: freeMin > 0 ? t('home.free_badge', { minutes: freeMin }) : t('home.talk_pandit_sub'), onPress: () => router.push({ pathname: '/(tabs)/consult', params: { tab: 'pandit' } }), tone: 'kesari' },
-        ].map((a) => {
-          const bg = a.tone === 'kesari' ? c.primary : a.tone === 'gold' ? c.marigold : c.surface;
-          const fg = a.tone === 'kesari' ? c.onPrimary : a.tone === 'gold' ? c.marigoldInk : c.ink;
-          return (
-            <Pressable key={a.key} onPress={a.onPress} accessibilityRole="button" accessibilityLabel={`${a.title}, ${a.sub}`}
-              style={({ pressed }) => ({ width: '48.8%', minHeight: 116, backgroundColor: bg, borderRadius: 20, padding: space.l, gap: 2, justifyContent: 'space-between',
-                borderWidth: a.tone === 'plain' ? 1 : 0, borderColor: c.line, opacity: pressed ? 0.85 : 1 })}>
-              <T style={{ fontSize: 26, lineHeight: 32 }}>{a.icon}</T>
-              <View>
-                <T style={{ fontWeight: '700' }} color={fg} numberOfLines={2}>{a.title}</T>
-                <T v="small" color={fg} style={{ opacity: 0.85 }} numberOfLines={1}>{a.sub}</T>
-              </View>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      {/* Quick tools row */}
-      <Section title={t('tools.title')}>
+      {/* Astrologers */}
+      <Section title={t('home.astrologers')} action={<Pressable hitSlop={8} onPress={() => router.push({ pathname: '/(tabs)/consult', params: { tab: 'pandit' } })}><T v="small" color={c.primary} style={{ fontWeight: '700' }}>{t('home.see_all')} ›</T></Pressable>}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -space.l }} contentContainerStyle={{ paddingHorizontal: space.l, gap: space.s }}>
-          {([
-            ['🪐', 'sade_sati', '/tools/sade-sati'], ['🌌', 'gochar', '/tools/gochar'], ['⏳', 'muhurat', '/tools/choghadiya'],
-            ['🔢', 'numerology', '/tools/numerology'], ['💞', 'match', '/match'],
-          ] as const).map(([icon, key, href]) => (
-            <Pressable key={key} onPress={() => router.push(href)} accessibilityRole="button"
-              style={({ pressed }) => ({ width: 96, paddingVertical: space.m, borderRadius: 16, alignItems: 'center', gap: 6, backgroundColor: c.surface, borderWidth: 1, borderColor: c.line, opacity: pressed ? 0.8 : 1 })}>
-              <T style={{ fontSize: 24, lineHeight: 30 }}>{icon}</T>
-              <T v="tiny" style={{ fontWeight: '600', textAlign: 'center' }} numberOfLines={2}>{key === 'match' ? t('kundli.matching') : t(`tools.${key}`)}</T>
-            </Pressable>
-          ))}
+          {!pandits.data ? [0, 1, 2].map((i) => <Skeleton key={i} w={140} h={190} r={16} />) : online.map((p) => {
+            const available = p.online && !p.busy;
+            return (
+              <Pressable key={p.id} onPress={() => router.push({ pathname: '/pandit/[id]', params: { id: p.id } })} accessibilityRole="button"
+                style={{ width: 140, padding: space.m, borderRadius: 16, backgroundColor: c.surface, borderWidth: 1, borderColor: c.line, alignItems: 'center', gap: 4 }}>
+                <Avatar name={p.displayName} url={p.photoUrl} size={56} />
+                <T v="small" style={{ fontWeight: '700', textAlign: 'center' }} numberOfLines={1}>{p.displayName}{p.verified ? ' ✓' : ''}</T>
+                <T v="tiny" color={c.inkSoft} numberOfLines={1}>{p.languages.slice(0, 2).map(langName).join(', ')}</T>
+                <T v="tiny" style={{ fontWeight: '700' }}>{p.rating ? `★ ${p.rating.toFixed(1)} · ` : ''}{t('common.per_min', { price: rupees(p.chatRatePaise) })}</T>
+                <Button small title={available ? t('home.chat') : p.online ? t('common.busy') : t('common.offline')} kind={available ? 'primary' : 'secondary'} disabled={!available} onPress={() => chat(p)} style={{ alignSelf: 'stretch', marginTop: 4 }} />
+              </Pressable>
+            );
+          })}
         </ScrollView>
       </Section>
 
-      {home.error && !h ? <ErrorState message={t('common.network_error')} onRetry={home.reload} /> : null}
+      {/* Your Rashi (or make your Kundli) */}
+      {primary ? (
+        <Pressable onPress={() => router.push({ pathname: '/kundli/[id]', params: { id: primary.id } })} accessibilityRole="button"
+          style={{ marginTop: space.xl, backgroundColor: c.sky, borderRadius: 24, padding: space.l, gap: space.s }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <T v="small" color={c.marigold} style={{ fontWeight: '700' }}>{t('home.your_rashi')} · {primary.name}</T>
+            <T v="small" color={c.skyInk}>{t('home.view_kundli')} ›</T>
+          </View>
+          {home.data ? (
+            <>
+              <T color={c.skyInk} style={{ fontSize: 20, lineHeight: 28, fontWeight: '800' }}>{GLYPHS[home.data.basics.rashi]} {t(`signs.${home.data.basics.rashi}`)}</T>
+              <T v="small" color={c.skyInk} style={{ opacity: 0.9 }}>
+                {t('home.nakshatra')}: {t(`nakshatras.${home.data.basics.nakshatra}`)} {home.data.basics.pada} · {t('home.lagna')}: {home.data.basics.lagna !== null ? t(`signs.${home.data.basics.lagna}`) : t('home.lagna_unknown')}
+              </T>
+              <T color={c.skyInk} numberOfLines={4} style={{ marginTop: space.xs }}>{home.data.horoscope.general}</T>
+            </>
+          ) : <Skeleton h={80} style={{ opacity: 0.25 }} />}
+        </Pressable>
+      ) : (
+        <View style={{ marginTop: space.xl, backgroundColor: c.sky, borderRadius: 24, padding: space.l, gap: space.s }}>
+          <T color={c.marigold} style={{ fontWeight: '800', fontSize: 18 }}>{t('home.make_kundli_title')}</T>
+          <T color={c.skyInk} v="small">{t('home.make_kundli_sub')}</T>
+          <Button title={t('home.make_kundli_cta')} onPress={() => router.push('/(tabs)/kundli')} style={{ marginTop: space.s }} />
+        </View>
+      )}
 
-      <Section title={t('home.energy')}>
-        {h ? <EnergyBars energy={h.energy} /> : <View style={{ gap: space.s }}>{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} h={14} />)}</View>}
+      {/* Today's Rashifal — all 12 signs */}
+      <Section title={t('home.zodiac')} action={<T v="tiny" color={c.inkSoft}>{t('home.zodiac_sub')}</T>}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: space.s }}>
+          {GLYPHS.map((g, i) => (
+            <Pressable key={i} onPress={() => router.push({ pathname: '/(tabs)/horoscope', params: { sign: String(i) } })} accessibilityRole="button" accessibilityLabel={t(`signs.${i}`)}
+              style={{ width: '25%', alignItems: 'center', paddingVertical: space.s, gap: 2 }}>
+              <View style={{ width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', backgroundColor: home.data?.basics.rashi === i ? c.sky : c.surface, borderWidth: 1, borderColor: c.line }}>
+                <T style={{ fontSize: 24, lineHeight: 30 }} color={home.data?.basics.rashi === i ? c.marigold : c.primary}>{g}</T>
+              </View>
+              <T v="tiny" numberOfLines={1}>{t(`signs.${i}`).split(' (')[0]}</T>
+            </Pressable>
+          ))}
+        </View>
       </Section>
 
-      <Section title={t('home.today')} action={<Pressable onPress={() => router.push('/(tabs)/horoscope')}><T v="small" color={c.primary} style={{ fontWeight: '600' }}>{t('horoscope.daily')}</T></Pressable>}>
-        {h ? (
-          <View style={{ gap: space.m }}>
-            {(['love', 'career', 'finance', 'family'] as const).map((k) => (
-              <View key={k} style={{ flexDirection: 'row', gap: space.m }}>
-                <T v="small" style={{ width: 70, fontWeight: '700' }} color={c.inkSoft}>{t(`horoscope.${k}`)}</T>
-                <T style={{ flex: 1 }}>{h.horoscope[k]}</T>
-              </View>
-            ))}
-            <View style={{ borderLeftWidth: 3, borderLeftColor: c.marigold, paddingLeft: space.m, marginTop: space.s }}>
-              <T v="small" color={c.inkSoft}>{t('home.advice')}</T>
-              <T style={{ fontWeight: '600' }}>{h.horoscope.advice}</T>
+      {/* Panchang */}
+      <Section title={t('home.panchang')} action={<Pressable hitSlop={8} onPress={() => router.push('/tools/panchang')}><T v="small" color={c.primary} style={{ fontWeight: '700' }}>{t('home.see_all')} ›</T></Pressable>}>
+        <Pressable onPress={() => router.push('/tools/panchang')} accessibilityRole="button" style={{ padding: space.m, borderRadius: 16, backgroundColor: c.surface, borderWidth: 1, borderColor: c.line }}>
+          <T v="tiny" color={c.inkSoft} style={{ marginBottom: space.s }}>{t('home.for_place', { place: place.name })}</T>
+          {pan.data ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: space.m }}>
+              {([
+                [t('home.tithi'), `${tr(`panchang.${pan.data.tithi.paksha}`, pan.data.tithi.paksha)} ${tr(`tithis.${pan.data.tithi.name}`, pan.data.tithi.name)}`],
+                [t('home.nakshatra'), t(`nakshatras.${pan.data.nakshatra.index}`)],
+                [t('home.sunrise'), clock(pan.data.sunrise)],
+                [t('home.sunset'), clock(pan.data.sunset)],
+                [t('home.rahu_kaal'), pan.data.rahuKaal ? `${clock(pan.data.rahuKaal.start)} – ${clock(pan.data.rahuKaal.end)}` : '—'],
+                [t('panchang.vara'), pan.data.vara],
+              ] as const).map(([k, v]) => (
+                <View key={k} style={{ width: '50%' }}>
+                  <T v="tiny" color={c.inkSoft}>{k}</T>
+                  <T v="small" style={{ fontWeight: '600' }}>{v}</T>
+                </View>
+              ))}
             </View>
-          </View>
-        ) : <View style={{ gap: space.s }}>{[0, 1, 2].map((i) => <Skeleton key={i} h={40} />)}</View>}
+          ) : <Skeleton h={90} />}
+        </Pressable>
       </Section>
 
-      {h?.panchang ? (
-        <Section title={t('home.panchang')} action={<Pressable onPress={() => router.push('/tools/choghadiya')} hitSlop={8}><T v="small" color={c.primary} style={{ fontWeight: '600' }}>{t('chog.title')}</T></Pressable>}>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: space.m }}>
-            {[
-              [t('home.tithi'), `${t(`panchang.${h.panchang.tithi.paksha}`)} ${t(`tithis.${h.panchang.tithi.name}`)}`],
-              [t('home.nakshatra'), t(`nakshatras.${h.panchang.nakshatra.index}`)],
-              [t('home.sunrise'), clock(h.panchang.sunrise, lang)],
-              [t('home.sunset'), clock(h.panchang.sunset, lang)],
-              [t('home.rahu_kaal'), h.panchang.rahuKaal ? `${clock(h.panchang.rahuKaal.start, lang)} – ${clock(h.panchang.rahuKaal.end, lang)}` : '—'],
-            ].map(([k, v]) => (
-              <View key={k} style={{ width: '50%' }}>
-                <T v="tiny" color={c.inkSoft}>{k}</T>
-                <T v="small" style={{ fontWeight: '600' }}>{v}</T>
-              </View>
-            ))}
-          </View>
+      {/* More free services */}
+      <Section title={t('home.free_tools')}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.s }}>
+          {([
+            ['🌌', t('home.q_gochar'), '/tools/gochar'], ['⏳', t('home.q_choghadiya'), '/tools/choghadiya'],
+            ['🪐', t('home.q_sade_sati'), '/tools/sade-sati'], ['🔢', t('home.q_numerology'), '/tools/numerology'],
+          ] as const).map(([icon, label, href]) => (
+            <Pressable key={href} onPress={() => router.push(href)} accessibilityRole="button"
+              style={({ pressed }) => ({ width: '48.5%', flexDirection: 'row', alignItems: 'center', gap: space.s, padding: space.m, borderRadius: 14, backgroundColor: c.surface, borderWidth: 1, borderColor: c.line, opacity: pressed ? 0.8 : 1 })}>
+              <T style={{ fontSize: 22, lineHeight: 28 }}>{icon}</T>
+              <T v="small" style={{ fontWeight: '600', flex: 1 }} numberOfLines={2}>{label}</T>
+            </Pressable>
+          ))}
+        </View>
+      </Section>
+
+      {/* My Kundlis */}
+      {list.length ? (
+        <Section title={t('home.my_kundlis')} action={<Pressable hitSlop={8} onPress={() => router.push('/(tabs)/kundli')}><T v="small" color={c.primary} style={{ fontWeight: '700' }}>+ {t('kundli.new')}</T></Pressable>}>
+          {list.slice(0, 4).map((k, i, a) => (
+            <Row key={k.id} title={k.name} subtitle={`${new Date(`${k.date}T00:00:00`).toLocaleDateString(lang, { day: 'numeric', month: 'short', year: 'numeric' })}${k.time ? ` · ${k.time}` : ''} · ${k.placeName}`}
+              onPress={() => router.push({ pathname: '/kundli/[id]', params: { id: k.id } })} last={i === a.length - 1} />
+          ))}
         </Section>
       ) : null}
 
-      {!primary ? <Button title={t('home.add_birth_cta')} onPress={() => router.push('/profiles/new')} style={{ marginTop: space.xl }} /> : null}
       <T v="tiny" color={c.inkSoft} style={{ marginTop: space.xl }}>{t('common.disclaimer')}</T>
+      <StartPanditSheet pandit={chosen} onClose={() => setChosen(null)} />
     </Screen>
   );
 }

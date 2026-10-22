@@ -11,6 +11,7 @@ import type { Pandit } from '@/lib/types';
 import { LANGUAGES } from '@/i18n/languages';
 import { Badge, Button, Chip, ErrorState, Screen, Segmented, Sheet, Skeleton, T } from '@/components/ui';
 import { PanditRow } from '@/components/PanditRow';
+import { useRequireLogin } from '@/lib/auth';
 import { StartPanditSheet } from '@/components/StartPanditSheet';
 
 const TOPICS = ['career', 'marriage', 'love', 'finance', 'family', 'education', 'travel', 'property', 'general', 'planets'];
@@ -22,8 +23,8 @@ export default function ConsultScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ tab?: string }>();
   const { user, meta, language } = useApp();
-  const [tab, setTab] = useState<'ai' | 'pandit'>(params.tab === 'pandit' ? 'pandit' : 'ai');
-  useEffect(() => { if (params.tab === 'pandit') setTab('pandit'); }, [params.tab]);
+  const [tab, setTab] = useState<'ai' | 'pandit'>(params.tab === 'ai' ? 'ai' : 'pandit');
+  useEffect(() => { if (params.tab === 'ai' || params.tab === 'pandit') setTab(params.tab); }, [params.tab]);
 
   const [lang, setLang] = useState<string | null>(language);
   const [online, setOnline] = useState(false);
@@ -33,6 +34,7 @@ export default function ConsultScreen() {
   const [langOpen, setLangOpen] = useState(false);
   const [chosen, setChosen] = useState<Pandit | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
+  const ensure = useRequireLogin();
 
   const qs = new URLSearchParams({ sort, ...(lang ? { lang } : {}), ...(online ? { online: 'true' } : {}), ...(freeOnly ? { free: 'true' } : {}) }).toString();
   const list = useFetch<Pandit[]>(tab === 'pandit' ? `/pandits?${qs}` : null);
@@ -50,9 +52,9 @@ export default function ConsultScreen() {
 
   return (
     <Screen>
-      <T v="h1" style={{ paddingTop: space.l }}>{t('consult.title')}</T>
+      <T v="h1" style={{ paddingTop: space.l }}>{t('tabs.astrologers')}</T>
       <View style={{ marginTop: space.m }}>
-        <Segmented value={tab} onChange={setTab} options={[{ value: 'ai', label: t('consult.ai_title') }, { value: 'pandit', label: t('consult.pandit_title') }]} />
+        <Segmented value={tab} onChange={setTab} options={[{ value: 'pandit', label: t('consult.pandit_title') }, { value: 'ai', label: t('consult.ai_title') }]} />
       </View>
       <T v="small" color={c.inkSoft} style={{ marginTop: space.s }}>{t('consult.ai_vs_pandit')}</T>
 
@@ -98,7 +100,7 @@ export default function ConsultScreen() {
             : list.data.length === 0 ? <T color={c.inkSoft} style={{ marginTop: space.xl, textAlign: 'center' }}>{t('consult.no_pandits')}</T>
               : list.data.map((p) => (
                 <PanditRow key={p.id} p={p} freeMinutes={freeMin}
-                  onOpen={() => router.push({ pathname: '/pandit/[id]', params: { id: p.id } })} onChat={() => setChosen(p)} />
+                  onOpen={() => router.push({ pathname: '/pandit/[id]', params: { id: p.id } })} onChat={() => { if (ensure('/(tabs)/consult?tab=pandit')) setChosen(p); }} />
               ))}
           <T v="tiny" color={c.inkSoft} style={{ marginTop: space.l }}>{t('consult.calls_soon')}</T>
         </View>

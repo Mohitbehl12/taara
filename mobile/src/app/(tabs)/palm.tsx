@@ -9,6 +9,7 @@ import { capturePalm, uploadPalm, type PalmReading } from '@/lib/palm';
 import { space, useTheme } from '@/lib/theme';
 import { Button, Row, Screen, Section, Segmented, T } from '@/components/ui';
 import { errorMessage } from '@/lib/errors';
+import { LoginGate, useSignedIn } from '@/components/Gates';
 
 type Hand = 'left' | 'right' | 'both';
 
@@ -25,7 +26,7 @@ function PalmMark({ size, line, accent }: { size: number; line: string; accent: 
   );
 }
 
-export default function PalmScreen() {
+function PalmScreenScreen() {
   const { t, i18n } = useTranslation();
   const { c } = useTheme();
   const router = useRouter();
@@ -115,4 +116,9 @@ export default function PalmScreen() {
       <T v="tiny" color={c.inkSoft} style={{ marginTop: space.xl }}>{t('palm.disclaimer')}</T>
     </Screen>
   );
+}
+
+/** Needs an account; guests see a short explanation and a login button. */
+export default function PalmScreen() {
+  return useSignedIn() ? <PalmScreenScreen /> : <LoginGate next="/(tabs)/palm" icon="✋" top />;
 }

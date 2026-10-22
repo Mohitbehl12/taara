@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Pressable } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { finishLogin } from '@/lib/auth';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/lib/api';
 import { useApp } from '@/lib/store';
@@ -12,7 +13,8 @@ import { errorMessage } from '@/lib/errors';
 export default function Otp() {
   const { t } = useTranslation();
   const { c } = useTheme();
-  const { phone = '' } = useLocalSearchParams<{ phone?: string }>();
+  const { phone = '', next } = useLocalSearchParams<{ phone?: string; next?: string }>();
+  const router = useRouter();
   const signIn = useApp((s) => s.signIn);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -27,6 +29,7 @@ export default function Otp() {
     try {
       const r = await api<{ token: string }>('/auth/otp/verify', { body: { phone, code: value, deviceId: await deviceId() } });
       await signIn(r.token);
+      finishLogin(router, next);
     } catch (e: any) {
       setError(e.code === 'otp_expired' ? t('auth.otp_expired') : e.code === 'otp_invalid' ? t('auth.otp_invalid') : errorMessage(t, e));
     } finally { setBusy(false); }

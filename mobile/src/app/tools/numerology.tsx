@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { KeyboardAvoidingView, Platform, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/lib/api';
-import { useApp } from '@/lib/store';
+import { usePrimaryKundli } from '@/lib/store';
 import { space, useTheme } from '@/lib/theme';
 import { Button, Field, Panel, Screen, T } from '@/components/ui';
 import { PickerField } from '@/components/BirthForm';
@@ -17,8 +17,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
 export default function Numerology() {
   const { t } = useTranslation();
   const { c } = useTheme();
-  const user = useApp((s) => s.user);
-  const primary = user?.profiles.find((p) => p.isPrimary);
+  const primary = usePrimaryKundli();
   const [name, setName] = useState(/^[A-Za-z\s.]+$/.test(primary?.name ?? '') ? primary!.name : '');
   const [date, setDate] = useState<Date | null>(primary ? new Date(`${primary.date}T12:00:00`) : null);
   const [res, setRes] = useState<Res | null>(null);

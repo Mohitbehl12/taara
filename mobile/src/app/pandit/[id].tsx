@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useTranslation } from 'react-i18next';
+import { useRequireLogin } from '@/lib/auth';
 import { api, rupees } from '@/lib/api';
 import { useApp } from '@/lib/store';
 import { useFetch } from '@/lib/useFetch';
@@ -18,8 +19,10 @@ export default function PanditProfile() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const user = useApp((s) => s.user);
   const p = useFetch<Pandit>(`/pandits/${id}`);
-  const favs = useFetch<Pandit[]>('/favorites');
+  const token = useApp((s) => s.token);
+  const favs = useFetch<Pandit[]>(token ? '/favorites' : null);
   const [chosen, setChosen] = useState<Pandit | null>(null);
+  const ensure = useRequireLogin();
   const d = p.data;
   if (p.error && !d) return <ErrorState message={t('common.network_error')} onRetry={p.reload} />;
   if (!d) return <Loading />;
@@ -28,6 +31,7 @@ export default function PanditProfile() {
   const freeMin = Math.floor((user?.freeSecondsRemaining ?? 0) / 60);
 
   const toggleFav = async () => {
+    if (!ensure(`/pandit/${d.id}`)) return;
     await api(`/favorites/${d.id}`, { method: fav ? 'DELETE' : 'PUT' }).catch(() => {});
     favs.reload();
   };
@@ -56,7 +60,7 @@ export default function PanditProfile() {
       </View>
 
       <View style={{ flexDirection: 'row', gap: space.s, marginTop: space.l }}>
-        <Button title={freeMin > 0 && d.participatesInFree ? `${t('consult.chat')} · ${t('common.free')}` : t('consult.chat')} style={{ flex: 2 }} disabled={!available} onPress={() => setChosen(d)} />
+        <Button title={freeMin > 0 && d.participatesInFree ? `${t('consult.chat')} · ${t('common.free')}` : t('consult.chat')} style={{ flex: 2 }} disabled={!available} onPress={() => { if (ensure(`/pandit/${d.id}`)) setChosen(d); }} />
         <Button title={fav ? t('consult.favorited') : t('consult.favorite')} kind="secondary" style={{ flex: 1 }} onPress={toggleFav} />
       </View>
       <T v="tiny" color={c.inkSoft} style={{ marginTop: space.s }}>{t('consult.calls_soon')}</T>

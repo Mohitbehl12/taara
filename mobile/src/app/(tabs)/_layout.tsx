@@ -23,9 +23,11 @@ export default function TabsLayout() {
     }}>
       <Tabs.Screen name="index" options={{ title: t('tabs.home'), tabBarIcon: icon('⌂') }} />
       <Tabs.Screen name="horoscope" options={{ title: t('tabs.horoscope'), tabBarIcon: icon('☉') }} />
-      <Tabs.Screen name="palm" options={{ title: t('tabs.palm'), tabBarIcon: icon('✋\uFE0E') }} />
-      <Tabs.Screen name="consult" options={{ title: t('tabs.consult'), tabBarIcon: icon('✦') }} />
-      <Tabs.Screen name="profile" options={{ title: t('tabs.profile'), tabBarIcon: icon('◐') }} />
+      <Tabs.Screen name="kundli" options={{ title: t('tabs.kundli'), tabBarIcon: icon('❖\uFE0E') }} />
+      <Tabs.Screen name="consult" options={{ title: t('tabs.astrologers'), tabBarIcon: icon('✦') }} />
+      <Tabs.Screen name="profile" options={{ title: t('tabs.more'), tabBarIcon: icon('☰') }} />
+      {/* Palm reading opens from Home, like AstroSage's tiles; it stays a route but not a tab. */}
+      <Tabs.Screen name="palm" options={{ href: null }} />
     </Tabs>
   );
 }

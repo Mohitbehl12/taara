@@ -9,11 +9,12 @@ import { useFetch } from '@/lib/useFetch';
 import { space, useTheme } from '@/lib/theme';
 import { Badge, Button, Row, Screen, Section, T } from '@/components/ui';
 import { CareCard, ReportSheet } from '@/components/Safety';
+import { LoginGate, useSignedIn } from '@/components/Gates';
 
 interface Complaint { id: string; category: string; text: string; status: string; resolution: string | null; createdAt: string }
 interface Blocked { id: string; displayName: string }
 
-export default function Safety() {
+function SafetyScreen() {
   const { t, i18n } = useTranslation();
   const { c } = useTheme();
   const router = useRouter();
@@ -66,4 +67,9 @@ export default function Safety() {
         categories={['billing', 'pandit_behaviour', 'ai_answer', 'abusive_message', 'fake_review', 'privacy', 'technical', 'other']} />
     </Screen>
   );
+}
+
+/** Needs an account; guests see a short explanation and a login button. */
+export default function Safety() {
+  return useSignedIn() ? <SafetyScreen /> : <LoginGate next="/safety" icon="🛡️" />;
 }

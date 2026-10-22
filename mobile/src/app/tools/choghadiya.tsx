@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { useApp } from '@/lib/store';
+import { usePrimaryKundli } from '@/lib/store';
 import { useFetch } from '@/lib/useFetch';
 import { space, useTheme } from '@/lib/theme';
 import { ErrorState, Loading, Screen, Segmented, T } from '@/components/ui';
@@ -12,7 +12,7 @@ interface Res { weekday: number; slots: Slot[]; abhijit: { start: string; end: s
 export default function Choghadiya() {
   const { t, i18n } = useTranslation();
   const { c } = useTheme();
-  const p = useApp((s) => s.user?.profiles.find((x) => x.isPrimary));
+  const p = usePrimaryKundli();
   const lat = p?.lat ?? 28.6139, lon = p?.lon ?? 77.209, tz = p?.tzOffsetMinutes ?? 330;
   const today = new Date(Date.now() + tz * 60_000).toISOString().slice(0, 10);
   const r = useFetch<Res>(`/tools/choghadiya?date=${today}&lat=${lat}&lon=${lon}&tz=${tz}`);

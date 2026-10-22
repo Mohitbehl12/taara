@@ -11,7 +11,12 @@ import { errorMessage } from '@/lib/errors';
 export async function startConsult(router: Router, t: TFunction, opts: {
   kind: 'ai' | 'pandit'; mode: 'chat' | 'voice'; panditId?: string; shareChart?: boolean; firstMessage?: string;
 }) {
-  const user = useApp.getState().user;
+  const { user, token } = useApp.getState();
+  // Chat and AI need an account (wallet, free minutes, safety). Guests go to login and come back here.
+  if (!token || !user?.consentCurrent) {
+    router.push({ pathname: token ? '/consent' : '/login', params: { next: `/(tabs)/consult?tab=${opts.kind === 'pandit' ? 'pandit' : 'ai'}` } });
+    return;
+  }
   const profileId = opts.shareChart === false ? undefined : user?.profiles.find((p) => p.isPrimary)?.id;
   try {
     const s = await api<Session>('/sessions', { body: { kind: opts.kind, mode: opts.mode, panditId: opts.panditId, profileId } });

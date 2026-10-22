@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { useApp } from '@/lib/store';
+import { useLocalSearchParams } from 'expo-router';
+import { usePrimaryKundli } from '@/lib/store';
+import { useKundliData } from '@/lib/kundlis';
 import { useFetch } from '@/lib/useFetch';
 import { space, useTheme } from '@/lib/theme';
 import type { Horoscope } from '@/lib/types';
@@ -16,9 +18,12 @@ type Day = 'yesterday' | 'today' | 'tomorrow';
 export default function HoroscopeScreen() {
   const { t, i18n } = useTranslation();
   const { c } = useTheme();
-  const home = useFetch<{ basics?: { rashi: number } }>(`/home?lang=${i18n.language}`);
+  const params = useLocalSearchParams<{ sign?: string }>();
+  const primary = usePrimaryKundli();
+  const home = useKundliData<{ basics?: { rashi: number } }>(primary, 'home', i18n.language);
   const myRashi = home.data?.basics?.rashi;
-  const [sign, setSign] = useState<number | null>(null);
+  const [sign, setSign] = useState<number | null>(params.sign !== undefined ? Number(params.sign) : null);
+  useEffect(() => { if (params.sign !== undefined) setSign(Number(params.sign)); }, [params.sign]);
   const [period, setPeriod] = useState<Period>('daily');
   const [day, setDay] = useState<Day>('today');
   useEffect(() => { if (sign === null && myRashi !== undefined) setSign(myRashi); }, [myRashi, sign]);

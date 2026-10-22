@@ -6,8 +6,9 @@ import { useFetch } from '@/lib/useFetch';
 import { space, useTheme } from '@/lib/theme';
 import type { Session } from '@/lib/types';
 import { Loading, Row, Screen, T } from '@/components/ui';
+import { LoginGate, useSignedIn } from '@/components/Gates';
 
-export default function History() {
+function HistoryScreen() {
   const { t, i18n } = useTranslation();
   const { c } = useTheme();
   const router = useRouter();
@@ -27,4 +28,9 @@ export default function History() {
       })}
     </Screen>
   );
+}
+
+/** Needs an account; guests see a short explanation and a login button. */
+export default function History() {
+  return useSignedIn() ? <HistoryScreen /> : <LoginGate next="/history" icon="🕘" />;
 }

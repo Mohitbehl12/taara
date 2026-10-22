@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { KeyboardAvoidingView, Platform, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { finishLogin } from '@/lib/auth';
 import { useTranslation } from 'react-i18next';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { api } from '@/lib/api';
@@ -13,6 +14,7 @@ export default function Login() {
   const { t } = useTranslation();
   const { c, dark } = useTheme();
   const router = useRouter();
+  const { next } = useLocalSearchParams<{ next?: string }>();
   const signIn = useApp((s) => s.signIn);
   const meta = useApp((s) => s.meta);
   const [phone, setPhone] = useState('');
@@ -27,7 +29,7 @@ export default function Login() {
     setBusy(true); setError(null);
     try {
       await api('/auth/otp/send', { body: { phone: digits } });
-      router.push({ pathname: '/otp', params: { phone: digits } });
+      router.push({ pathname: '/otp', params: { phone: digits, ...(next ? { next } : {}) } });
     } catch (e: any) {
       setError(errorMessage(t, e));
     } finally { setBusy(false); }
@@ -39,6 +41,7 @@ export default function Login() {
       const name = [cred.fullName?.givenName, cred.fullName?.familyName].filter(Boolean).join(' ') || undefined;
       const r = await api<{ token: string }>('/auth/social', { body: { provider: 'apple', idToken: cred.identityToken, name } });
       await signIn(r.token);
+      finishLogin(router, next);
     } catch (e: any) {
       if (e?.code !== 'ERR_REQUEST_CANCELED') setError(t('common.error_generic'));
     }

@@ -43,7 +43,7 @@ export default function Welcome() {
           }}
         />
         <View style={{ padding: space.l, gap: space.s, borderTopWidth: 1, borderTopColor: c.line }}>
-          <Button title={t('common.continue')} onPress={() => router.push('/login')} />
+          <Button title={t('common.continue')} onPress={async () => { await chooseLanguage(language); router.replace('/(tabs)'); }} />
           <T v="tiny" color={c.inkSoft} style={{ textAlign: 'center' }}>{t('welcome.change_later')}</T>
         </View>
       </View>

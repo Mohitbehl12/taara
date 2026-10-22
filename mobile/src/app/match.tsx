@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/lib/api';
-import { useApp } from '@/lib/store';
+import { useKundliList } from '@/lib/store';
+import { birthBody, isLocal } from '@/lib/kundlis';
+import { errorMessage } from '@/lib/errors';
 import { space, useTheme } from '@/lib/theme';
 import { Badge, Button, Chip, Screen, Section, T } from '@/components/ui';
 
@@ -18,17 +20,31 @@ export default function MatchScreen() {
   const { t, i18n } = useTranslation();
   const { c } = useTheme();
   const router = useRouter();
-  const profiles = useApp((s) => s.user?.profiles ?? []);
-  const [a, setA] = useState(profiles.find((p) => p.isPrimary)?.id ?? null);
+  const profiles = useKundliList();
+  const [a, setA] = useState(profiles.find((p) => p.isPrimary)?.id ?? profiles[0]?.id ?? null);
   const [b, setB] = useState<string | null>(profiles.find((p) => !p.isPrimary)?.id ?? null);
   const [res, setRes] = useState<Match | null>(null);
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  // A person added via "+ Add" fills the first empty slot when we come back.
+  const seen = useRef(profiles.map((p) => p.id));
+  useEffect(() => {
+    const added = profiles.find((p) => !seen.current.includes(p.id));
+    seen.current = profiles.map((p) => p.id);
+    if (!added) return;
+    if (!a) setA(added.id); else if (!b && added.id !== a) setB(added.id);
+    setRes(null);
+  }, [profiles, a, b]);
 
   const run = async () => {
-    if (!a || !b) return;
-    setBusy(true);
-    try { setRes(await api<Match>('/match', { body: { groomProfileId: a, brideProfileId: b, lang: i18n.language } })); }
-    finally { setBusy(false); }
+    const ka = profiles.find((p) => p.id === a), kb = profiles.find((p) => p.id === b);
+    if (!ka || !kb) return;
+    setBusy(true); setErr(null);
+    try {
+      setRes(isLocal(ka) || isLocal(kb)
+        ? await api<Match>('/free/match', { body: { groom: birthBody(ka), bride: birthBody(kb), lang: i18n.language } })
+        : await api<Match>('/match', { body: { groomProfileId: ka.id, brideProfileId: kb.id, lang: i18n.language } }));
+    } catch (e: any) { setErr(errorMessage(t, e)); } finally { setBusy(false); }
   };
 
   const picker = (label: string, value: string | null, set: (id: string) => void, exclude: string | null) => (
@@ -36,7 +52,7 @@ export default function MatchScreen() {
       <T v="small" color={c.inkSoft} style={{ fontWeight: '700' }}>{label}</T>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.s }}>
         {profiles.filter((p) => p.id !== exclude).map((p) => <Chip key={p.id} label={p.name} selected={p.id === value} onPress={() => { set(p.id); setRes(null); }} />)}
-        <Chip label={`+ ${t('match.add_new')}`} onPress={() => router.push({ pathname: '/profiles/new', params: { returnTo: '/match' } })} />
+        <Chip label={`+ ${t('match.add_new')}`} onPress={() => router.push({ pathname: '/kundli/new', params: { returnTo: '/match' } })} />
       </ScrollView>
     </View>
   );
@@ -46,8 +62,10 @@ export default function MatchScreen() {
   return (
     <Screen edges={[]} style={{ gap: space.l, paddingTop: space.m }}>
       <T v="h1">{t('match.title')}</T>
+      <T color={c.inkSoft}>{t('kundli.matching_sub')}</T>
       {picker(t('match.person1'), a, setA, b)}
       {picker(t('match.person2'), b, setB, a)}
+      {err ? <T color={c.danger}>{err}</T> : null}
       <Button title={t('match.calculate')} onPress={run} loading={busy} disabled={!a || !b} />
 
       {res ? (

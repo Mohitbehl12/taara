@@ -109,21 +109,26 @@ export async function ownProfile(id: string, userId: string) {
   return p;
 }
 
-export const chartOf = (p: typeof schema.birthProfiles.$inferSelect) =>
+type BirthLike = Pick<typeof schema.birthProfiles.$inferSelect, 'date' | 'time' | 'timeAccuracy' | 'tzOffsetMinutes' | 'lat' | 'lon'>;
+export const chartOf = (p: BirthLike) =>
   computeChart({ date: p.date, time: p.timeAccuracy === 'unknown' ? null : p.time, tzOffsetMinutes: p.tzOffsetMinutes, lat: p.lat, lon: p.lon });
 
 astroRoutes.get('/profiles/:id/kundli', requireAuth, handler({ query: z.object({ lang: z.string().default('en') }) }, async ({ req, query, user }) => {
   const p = await ownProfile(String(req.params.id), user.id);
-  const chart = chartOf(p);
-  const summary = chartSummary(chart);
   await track(user.id, 'kundli_viewed');
   // Explanations are composed on the device from locale strings, so the chart needs no translation round-trip.
   void query.lang;
+  return kundliPayload(p);
+}));
+
+function kundliPayload<P extends BirthLike>(p: P) {
+  const chart = chartOf(p);
+  const summary = chartSummary(chart);
   return {
     profile: p, chart, basics: summary.basics, placements: summary.placements, doshas: summary.doshas, note: summary.note,
     dasha: { periods: summary.dasha.periods, current: summary.dasha.current, simple: summary.dasha.simple },
   };
-}));
+}
 
 // ---------- matching ----------
 astroRoutes.post('/match', requireAuth, handler({
@@ -131,8 +136,12 @@ astroRoutes.post('/match', requireAuth, handler({
 }, async ({ body, user }) => {
   const g = chartOf(await ownProfile(body.groomProfileId, user.id));
   const b = chartOf(await ownProfile(body.brideProfileId, user.id));
+  await track(user.id, 'match_generated', {});
+  return matchPayload(g, b, body.lang);
+}));
+
+async function matchPayload(g: ReturnType<typeof chartOf>, b: ReturnType<typeof chartOf>, lang: string) {
   const result = gunaMilan({ moonSign: g.moonSign, nakshatra: g.nakshatra }, { moonSign: b.moonSign, nakshatra: b.nakshatra });
-  await track(user.id, 'match_generated', { total: result.total });
   // Simple 0–100 area scores derived from the kootas, for the friendly view.
   const k = Object.fromEntries(result.kootas.map((x) => [x.key, x.score / x.max]));
   const pct = (v: number) => Math.round(v * 100);
@@ -146,8 +155,8 @@ astroRoutes.post('/match', requireAuth, handler({
     longTerm: pct((k.nadi + k.tara + k.gana) / 3),
   };
   const manglik = { groom: chartSummary(g).doshas.manglik.present, bride: chartSummary(b).doshas.manglik.present };
-  return translateObject({ ...result, areas, manglik }, body.lang);
-}));
+  return translateObject({ ...result, areas, manglik }, lang);
+}
 
 // ---------- panchang, horoscope, home ----------
 astroRoutes.get('/panchang', handler({
@@ -169,9 +178,13 @@ astroRoutes.get('/horoscope/:sign', handler({
 astroRoutes.get('/home', requireAuth, handler({ query: z.object({ lang: z.string().default('en') }) }, async ({ query, user }) => {
   const [p] = await db().select().from(schema.birthProfiles).where(and(eq(schema.birthProfiles.userId, user.id), eq(schema.birthProfiles.isPrimary, true)));
   if (!p) return { profile: null };
+  return homePayload(p, query.lang);
+}));
+
+async function homePayload(p: BirthLike & { id: string; name: string }, lang: string) {
   const chart = chartOf(p);
   const energy = dailyEnergy(chart.moonSign);
-  const horoscope = await getHoroscope(chart.moonSign, 'daily', query.lang);
+  const horoscope = await getHoroscope(chart.moonSign, 'daily', lang);
   const today = new Date(Date.now() + p.tzOffsetMinutes * 60_000).toISOString().slice(0, 10);
   return {
     profile: { id: p.id, name: p.name, timeKnown: chart.timeKnown },
@@ -184,21 +197,56 @@ astroRoutes.get('/home', requireAuth, handler({ query: z.object({ lang: z.string
     horoscope,
     panchang: panchang({ date: today, lat: p.lat, lon: p.lon, tzOffsetMinutes: p.tzOffsetMinutes }),
   };
-}));
+}
 
 // ---------- tools ----------
 astroRoutes.get('/tools/sade-sati', requireAuth, handler({ query: z.object({ profileId: z.string().uuid() }) }, async ({ query, user }) => {
-  const p = await ownProfile(query.profileId, user.id);
+  return sadeSatiPayload(await ownProfile(query.profileId, user.id));
+}));
+
+function sadeSatiPayload(p: BirthLike) {
   const chart = chartOf(p);
   const birth = new Date(chart.utc);
   const to = new Date(birth.getTime() + 100 * 365.25 * 86_400_000);
   return { moonSign: chart.moonSign, ...saturnCycle(chart.moonSign, birth, to) };
-}));
+}
 
 astroRoutes.get('/tools/gochar', requireAuth, handler({ query: z.object({ profileId: z.string().uuid() }) }, async ({ query, user }) => {
-  const chart = chartOf(await ownProfile(query.profileId, user.id));
-  return { moonSign: chart.moonSign, at: new Date().toISOString(), transits: transitHouses(chart.moonSign) };
+  return gocharPayload(await ownProfile(query.profileId, user.id));
 }));
+
+function gocharPayload(p: BirthLike) {
+  const chart = chartOf(p);
+  return { moonSign: chart.moonSign, at: new Date().toISOString(), transits: transitHouses(chart.moonSign) };
+}
+
+// ---------- free tools without an account (AstroSage-style) ----------
+// Birth details travel with the request; nothing is stored. Rate-limited per IP.
+const birthBody = z.object({
+  name: z.string().min(1).max(80).default('Guest'),
+  date: z.string().regex(dateRe),
+  time: z.string().regex(timeRe).nullable().optional(),
+  timeAccuracy: z.enum(['exact', 'approx', 'unknown']).default('exact'),
+  placeName: z.string().min(1).max(160),
+  lat: z.number().min(-66).max(66),
+  lon: z.number().min(-180).max(180),
+  tzOffsetMinutes: z.number().int().min(-720).max(840).optional(),
+});
+const asBirth = (b: z.infer<typeof birthBody>) => ({
+  ...b, id: 'local', relation: 'self', time: b.timeAccuracy === 'unknown' ? null : b.time ?? null,
+  tzOffsetMinutes: b.tzOffsetMinutes ?? tzOffsetAt(b.lat, b.lon, b.date, b.time ?? '12:00').tzOffsetMinutes,
+});
+const freeLimit = (ip: string | undefined) => rateLimit(`free:${ip}`, 60, 30);
+
+astroRoutes.post('/free/kundli', handler({ body: birthBody }, async ({ body, req }) => { freeLimit(req.ip); return kundliPayload(asBirth(body)); }));
+astroRoutes.post('/free/home', handler({ body: birthBody.extend({ lang: z.string().max(5).default('en') }) }, async ({ body, req }) => {
+  freeLimit(req.ip); return homePayload(asBirth(body), body.lang);
+}));
+astroRoutes.post('/free/match', handler({ body: z.object({ groom: birthBody, bride: birthBody, lang: z.string().max(5).default('en') }) }, async ({ body, req }) => {
+  freeLimit(req.ip); return matchPayload(chartOf(asBirth(body.groom)), chartOf(asBirth(body.bride)), body.lang);
+}));
+astroRoutes.post('/free/sade-sati', handler({ body: birthBody }, async ({ body, req }) => { freeLimit(req.ip); return sadeSatiPayload(asBirth(body)); }));
+astroRoutes.post('/free/gochar', handler({ body: birthBody }, async ({ body, req }) => { freeLimit(req.ip); return gocharPayload(asBirth(body)); }));
 
 astroRoutes.get('/tools/choghadiya', handler({
   query: z.object({ date: z.string().regex(dateRe), lat: z.coerce.number().default(28.6139), lon: z.coerce.number().default(77.209), tz: z.coerce.number().default(330) }),

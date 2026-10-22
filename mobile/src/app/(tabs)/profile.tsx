@@ -9,14 +9,15 @@ import { disconnectSocket } from '@/lib/socket';
 import { useApp } from '@/lib/store';
 import { space, useTheme } from '@/lib/theme';
 import { langName } from '@/i18n/languages';
-import { Badge, Row, Screen, Section, Segmented, T } from '@/components/ui';
+import { Badge, Button, Panel, Row, Screen, Section, Segmented, T } from '@/components/ui';
+import { useKundliList } from '@/lib/store';
 
 export default function Profile() {
   const { t, i18n } = useTranslation();
   const { c } = useTheme();
   const router = useRouter();
   const { user, updateUser, signOut, setMode } = useApp();
-  if (!user) return null;
+  if (!user) return <GuestMore />;
   const primary = user.profiles.find((p) => p.isPrimary);
   const pandit = user.pandit;
 
@@ -57,13 +58,14 @@ export default function Profile() {
   return (
     <Screen>
       <View style={{ paddingTop: space.l, gap: 2 }}>
-        <T v="h1">{user.name}</T>
+        <T v="h1">{t('more.title')}</T>
+        <T style={{ fontWeight: '700' }}>{user.name}</T>
         <T color={c.inkSoft}>{user.phone ?? user.email}</T>
       </View>
 
       <Section title={t('profile.birth_details')}>
         {primary ? <T>{new Date(`${primary.date}T00:00:00`).toLocaleDateString(i18n.language, { dateStyle: 'long' })}{primary.time ? ` · ${primary.time}` : ''} · {primary.placeName}</T> : null}
-        <Row title={t('profile.my_charts')} subtitle={user.profiles.map((p) => p.name).join(', ')} onPress={() => router.push('/kundli')} />
+        <Row title={t('profile.my_charts')} subtitle={user.profiles.map((p) => p.name).join(', ')} onPress={() => router.push('/(tabs)/kundli')} />
         <Row title={t('profile.wallet')} right={<T style={{ fontWeight: '700' }}>{rupees(user.balancePaise)}</T>} onPress={() => router.push('/wallet')} />
         <Row title={t('profile.history')} onPress={() => router.push('/history')} />
         <Row title={t('profile.reports')} onPress={() => router.push('/reports')} last />
@@ -112,6 +114,39 @@ export default function Profile() {
       <Section>
         <Row title={t('profile.logout')} onPress={async () => { disconnectSocket(); await signOut(); }} last />
       </Section>
+    </Screen>
+  );
+}
+
+/** "More" for guests: a login card, then everything that works without an account. */
+function GuestMore() {
+  const { t } = useTranslation();
+  const { c } = useTheme();
+  const router = useRouter();
+  const language = useApp((s) => s.language);
+  const kundlis = useKundliList();
+  const doc = (d: string) => () => router.push({ pathname: '/legal/[doc]', params: { doc: d } });
+  return (
+    <Screen>
+      <T v="h1" style={{ paddingTop: space.l }}>{t('more.title')}</T>
+      <Panel style={{ marginTop: space.l, gap: space.s }}>
+        <T v="h2">{t('more.guest_title')}</T>
+        <T v="small" color={c.inkSoft}>{t('more.guest_sub')}</T>
+        <Button title={t('more.login')} onPress={() => router.push('/login')} style={{ marginTop: space.s }} />
+      </Panel>
+      <Section title={t('more.settings')}>
+        <Row title={t('profile.language')} subtitle={langName(language)} onPress={() => router.push('/language')} />
+        <Row title={t('home.my_kundlis')} subtitle={kundlis.map((k) => k.name).join(', ') || undefined} onPress={() => router.push('/(tabs)/kundli')} last />
+      </Section>
+      <Section>
+        <Row title={t('profile.become_pandit')} onPress={() => router.push({ pathname: '/login', params: { next: '/pandit-apply' } })} />
+        <Row title={t('profile.help')} onPress={doc('help')} />
+        <Row title={t('profile.terms')} onPress={doc('terms')} />
+        <Row title={t('profile.privacy_policy')} onPress={doc('privacy')} />
+        <Row title={t('profile.refund_policy')} onPress={doc('refund')} />
+        <Row title={t('profile.disclaimer')} onPress={doc('disclaimer')} last />
+      </Section>
+      <T v="tiny" color={c.inkSoft} style={{ marginTop: space.xl }}>{t('common.disclaimer')}</T>
     </Screen>
   );
 }

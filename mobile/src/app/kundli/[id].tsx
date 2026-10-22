@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { Pressable, ScrollView, useWindowDimensions, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
-import { useApp } from '@/lib/store';
-import { useFetch } from '@/lib/useFetch';
+import { useKundliList } from '@/lib/store';
+import { useKundliData } from '@/lib/kundlis';
 import { space, useTheme } from '@/lib/theme';
 import type { Placement } from '@/lib/types';
 import { Badge, Chip, ErrorState, Loading, Row, Screen, Section, Segmented, T } from '@/components/ui';
@@ -25,12 +25,13 @@ export default function KundliScreen() {
   const { c } = useTheme();
   const router = useRouter();
   const { width } = useWindowDimensions();
-  const user = useApp((s) => s.user);
-  const profiles = user?.profiles ?? [];
-  const [pid, setPid] = useState(profiles.find((p) => p.isPrimary)?.id ?? profiles[0]?.id);
+  const params = useLocalSearchParams<{ id?: string }>();
+  const profiles = useKundliList();
+  const [pid, setPid] = useState(params.id ?? profiles.find((p) => p.isPrimary)?.id ?? profiles[0]?.id);
+  const current = profiles.find((p) => p.id === pid) ?? null;
   const [view, setView] = useState<'simple' | 'detailed'>('simple');
   const [style, setStyle] = useState<'north' | 'south'>('north');
-  const k = useFetch<KundliRes>(pid ? `/profiles/${pid}/kundli?lang=${i18n.language}` : null);
+  const k = useKundliData<KundliRes>(current, 'kundli', i18n.language);
   const d = k.data;
   const date = (iso: string) => new Date(iso).toLocaleDateString(i18n.language, { month: 'short', year: 'numeric' });
   const size = Math.min(width - space.l * 2, 360);
@@ -38,9 +39,9 @@ export default function KundliScreen() {
   return (
     <Screen edges={[]}>
       <View style={{ paddingTop: space.l, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <T v="h1">{t('kundli.title')}</T>
-        <Pressable onPress={() => router.push('/profiles/new')} accessibilityRole="button" hitSlop={8}>
-          <T color={c.primary} style={{ fontWeight: '600' }}>+ {t('kundli.add_profile')}</T>
+        <T v="h1" style={{ flex: 1 }} numberOfLines={1}>{current ? t('kundli.edit_for', { name: current.name }) : t('kundli.title')}</T>
+        <Pressable onPress={() => router.push('/(tabs)/kundli')} accessibilityRole="button" hitSlop={8}>
+          <T color={c.primary} style={{ fontWeight: '600' }}>+ {t('kundli.new')}</T>
         </Pressable>
       </View>
       {profiles.length > 1 ? (
@@ -53,8 +54,17 @@ export default function KundliScreen() {
         <Segmented value={view} onChange={setView} options={[{ value: 'simple', label: t('kundli.simple') }, { value: 'detailed', label: t('kundli.detailed') }]} />
       </View>
 
+      {current ? (
+        <View style={{ marginTop: space.m, padding: space.m, borderRadius: 12, backgroundColor: c.surface, borderWidth: 1, borderColor: c.line, gap: 2 }}>
+          <T v="tiny" color={c.inkSoft}>{t('kundli.birth')}</T>
+          <T v="small" style={{ fontWeight: '600' }}>
+            {new Date(`${current.date}T00:00:00`).toLocaleDateString(i18n.language, { dateStyle: 'medium' })}{current.time ? ` · ${current.time}` : ''} · {current.placeName}
+          </T>
+        </View>
+      ) : null}
+      {!current ? <T color={c.inkSoft} style={{ marginTop: space.l }}>{t('home.make_kundli_sub')}</T> : null}
       {k.error && !d ? <ErrorState message={t('common.network_error')} onRetry={k.reload} /> : null}
-      {!d ? <Loading /> : (
+      {!current ? null : !d ? <Loading /> : (
         <>
           {d.note ? <View style={{ marginTop: space.m, padding: space.m, backgroundColor: c.surfaceAlt, borderRadius: 12 }}><T v="small">{t('kundli.time_unknown_banner')}</T></View> : null}
           <View style={{ alignItems: 'center', marginTop: space.l, gap: space.m }}>
@@ -138,6 +148,7 @@ export default function KundliScreen() {
           </Section>
 
           <Section>
+            <Row title={t('home.talk_banner')} onPress={() => router.push('/(tabs)/consult')} />
             <Row title={t('kundli.matching')} onPress={() => router.push('/match')} />
             <Row title={t('kundli.reports')} onPress={() => router.push('/reports')} last />
           </Section>

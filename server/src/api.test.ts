@@ -207,6 +207,29 @@ describe('user journey', () => {
   });
 });
 
+describe('free tools without an account', () => {
+  const me = { name: 'Asha', date: '1990-08-15', time: '10:30', timeAccuracy: 'exact', placeName: 'New Delhi', lat: 28.6139, lon: 77.209 };
+  const partner = { name: 'Ravi', date: '1988-02-03', time: '06:15', timeAccuracy: 'exact', placeName: 'Patna', lat: 25.5941, lon: 85.1376 };
+  it('makes a kundli, home view, match, Sade Sati and transits from birth details alone', async () => {
+    const k = await api('/free/kundli', { body: me });
+    expect(k.chart.planets).toHaveLength(9);
+    expect(k.profile.tzOffsetMinutes).toBe(330);
+    const h = await api('/free/home', { body: { ...me, lang: 'en' } });
+    expect(h.basics.rashi).toBe(k.chart.moonSign);
+    const m = await api('/free/match', { body: { groom: partner, bride: me } });
+    expect(m.total).toBeGreaterThanOrEqual(0);
+    expect(m.total).toBeLessThanOrEqual(36);
+    const ss = await api('/free/sade-sati', { body: me });
+    expect(ss.periods.length).toBeGreaterThan(0);
+    const g = await api('/free/gochar', { body: me });
+    expect(g.transits.length).toBeGreaterThan(0);
+  });
+  it('still keeps paid and AI features behind login', async () => {
+    await expect(api('/wallet')).rejects.toMatchObject({ status: 401 });
+    await expect(api('/sessions', { body: { kind: 'ai', mode: 'chat' } })).rejects.toMatchObject({ status: 401 });
+  });
+});
+
 describe('birthplace search', () => {
   it('finds district towns and villages across India, best match first', async () => {
     const r = await api('/places/search?q=sitamarhi');

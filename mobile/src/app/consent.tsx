@@ -1,7 +1,7 @@
 // First-run consent (DPDP Act s.5–6): clear notice, explicit unticked boxes, 18+ confirmation, separate optional marketing.
 import React, { useState } from 'react';
 import { Alert, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/lib/api';
 import { TERMS_VERSION } from '@/lib/legal';
@@ -16,6 +16,7 @@ export default function Consent() {
   const { t } = useTranslation();
   const { c } = useTheme();
   const router = useRouter();
+  const { next } = useLocalSearchParams<{ next?: string }>();
   const { signOut } = useApp();
   const [adult, setAdult] = useState(false);
   const [terms, setTerms] = useState(false);
@@ -28,6 +29,9 @@ export default function Consent() {
     try {
       const u = await api<User>('/me/consent', { body: { termsVersion: TERMS_VERSION, ageConfirmed: true, marketing } });
       useApp.setState({ user: u });
+      await useApp.getState().syncLocalKundlis();
+      if (router.canDismiss()) router.dismissAll();
+      if (next) router.push(next as never);
     } catch { Alert.alert(t('common.error_generic')); } finally { setBusy(false); }
   };
   const under18 = () => Alert.alert(t('consent.under18_title'), t('consent.under18_body'), [

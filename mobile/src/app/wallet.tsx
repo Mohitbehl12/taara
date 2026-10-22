@@ -7,10 +7,11 @@ import { useApp } from '@/lib/store';
 import { useFetch } from '@/lib/useFetch';
 import { space, useTheme } from '@/lib/theme';
 import { Button, Screen, Section, T } from '@/components/ui';
+import { LoginGate, useSignedIn } from '@/components/Gates';
 
 interface Tx { id: string; type: string; amountPaise: number; balanceAfter: number; createdAt: string; note: string | null }
 
-export default function Wallet() {
+function WalletScreen() {
   const { t, i18n } = useTranslation();
   const { c } = useTheme();
   const router = useRouter();
@@ -42,4 +43,9 @@ export default function Wallet() {
       <T v="tiny" color={c.inkSoft} style={{ marginTop: space.xl }}>{t('wallet.refund_policy')}</T>
     </Screen>
   );
+}
+
+/** Needs an account; guests see a short explanation and a login button. */
+export default function Wallet() {
+  return useSignedIn() ? <WalletScreen /> : <LoginGate next="/wallet" icon="👛" />;
 }
