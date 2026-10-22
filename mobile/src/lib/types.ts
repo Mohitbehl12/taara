@@ -10,6 +10,7 @@ export interface Meta {
     palmDetailedPricePaise: number; palmFreePerDay: number;
   };
   features: { ai: boolean; voice: boolean; panditCalls: boolean };
+  demo?: boolean;
 }
 export interface BirthProfile {
   id: string; name: string; relation: string; date: string; time: string | null; timeAccuracy: 'exact' | 'approx' | 'unknown';

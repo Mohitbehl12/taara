@@ -17,6 +17,7 @@ interface AppState {
   mode: 'user' | 'pandit';
   boot: () => Promise<void>;
   signIn: (token: string) => Promise<void>;
+  demoSignIn: () => Promise<void>;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<User | null>;
   updateUser: (patch: Partial<User>) => Promise<void>;
@@ -33,11 +34,15 @@ export const useApp = create<AppState>((set, get) => ({
     const [token, lang, mode] = await Promise.all([store(TOKEN_KEY), store(LANG_KEY), store(MODE_KEY)]);
     if (lang) { setLanguage(lang); set({ language: lang }); }
     if (mode === 'pandit') set({ mode: 'pandit' });
-    api<Meta>('/meta').then((meta) => set({ meta })).catch(() => {});
+    const metaP = api<Meta>('/meta').then((meta) => { set({ meta }); return meta; }).catch(() => null);
     if (token) {
       setToken(token);
       set({ token });
       try { await get().refreshUser(); } catch { /* offline: keep token, screens will retry */ }
+    } else {
+      // Demo server: skip login entirely and open a fresh guest account.
+      const meta = await metaP;
+      if (meta?.demo) await get().demoSignIn().catch(() => {});
     }
     set({ ready: true });
   },
@@ -49,6 +54,11 @@ export const useApp = create<AppState>((set, get) => ({
     const u = await get().refreshUser();
     // Carry the language chosen on the welcome screen into the account.
     if (u && u.language !== get().language) await get().updateUser({ language: get().language });
+  },
+
+  demoSignIn: async () => {
+    const r = await api<{ token: string }>('/auth/demo', { body: { language: get().language } });
+    await get().signIn(r.token);
   },
 
   signOut: async () => {

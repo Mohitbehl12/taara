@@ -7,7 +7,7 @@ services:
     plan: starter
     region: singapore
     buildCommand: cd admin && npm ci --include=dev && npm run build && cd ../server && npm ci --include=dev && npm run build
-    startCommand: cd server && node dist/db/migrate.js && npm start
+    startCommand: cd server && if [ -n "$DATABASE_URL" ]; then node dist/db/migrate.js; fi && npm start
     healthCheckPath: /health
     disk:
       name: uploads

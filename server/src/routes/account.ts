@@ -5,7 +5,9 @@ import { UPLOAD_DIR } from './reports.js';
 import { z } from 'zod';
 import { LANGUAGE_CODES } from '../config/languages.js';
 import { db, schema } from '../db/client.js';
-import { handler, HttpError, requireAuth } from '../lib/http.js';
+import { handler, HttpError, requireAuth, signToken } from '../lib/http.js';
+import { env } from '../config/env.js';
+import { moveUserMoney, platformEntry } from '../services/wallet.js';
 import { linkPhone, sendOtp, socialLogin, verifyOtp } from '../services/auth.js';
 import { track } from '../services/analytics.js';
 
@@ -48,6 +50,29 @@ accountRoutes.patch('/me', requireAuth, handler({
 }, async ({ body, user }) => {
   await db().update(schema.users).set(body).where(eq(schema.users.id, user.id));
   return me(user.id);
+}));
+
+/**
+ * Demo mode only: creates a fresh guest (consent recorded, sample birth chart, ₹500 pretend balance, free minutes)
+ * so the whole app can be explored without an OTP. Each visitor gets their own account.
+ */
+accountRoutes.post('/auth/demo', handler({ body: z.object({ language: z.enum(LANGUAGE_CODES as [string, ...string[]]).default('hi') }) }, async ({ body }) => {
+  if (!env.demoMode) throw new HttpError(404, 'not_found');
+  const now = new Date();
+  const [u] = await db().insert(schema.users).values({
+    name: 'Guest', language: body.language, termsVersion: TERMS_VERSION, termsAcceptedAt: now, ageConfirmedAt: now,
+    freeGranted: true, freeSecondsRemaining: 60 * 60,
+  }).returning();
+  await db().insert(schema.birthProfiles).values({
+    userId: u.id, name: 'Guest', relation: 'self', date: '1992-03-14', time: '07:45', timeAccuracy: 'exact',
+    placeName: 'New Delhi, Delhi', lat: 28.6139, lon: 77.209, tzOffsetMinutes: 330, isPrimary: true,
+  });
+  await db().transaction(async (tx) => {
+    await moveUserMoney(tx, u.id, 50000, 'adjustment', { note: 'demo credit' });
+    await platformEntry(tx, -50000, 'adjustment', { note: 'demo credit' });
+  });
+  const [fresh] = await db().select().from(schema.users).where(eq(schema.users.id, u.id));
+  return { token: signToken({ id: u.id, role: u.role, tv: fresh.tokenVersion }), isNew: true, user: publicUser(fresh) };
 }));
 
 /** Current legal documents version. Bump when Terms/Privacy change materially; the app asks users to accept again. */

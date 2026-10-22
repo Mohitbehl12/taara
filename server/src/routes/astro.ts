@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { LANGUAGES } from '../config/languages.js';
+import { env } from '../config/env.js';
 import { ageOn, requireAdult } from '../services/safety.js';
 import { db, schema } from '../db/client.js';
 import { computeChart } from '../astro/engine.js';
@@ -30,6 +31,7 @@ astroRoutes.get('/meta', handler({}, async () => {
   const s = await allSettings();
   return {
     languages: LANGUAGES,
+    demo: env.demoMode,
     signs: SIGNS, nakshatras: NAKSHATRAS,
     pricing: {
       aiBillingMode: s['ai.billing_mode'], aiRatePerMinPaise: s['ai.rate_per_min_paise'], aiRatePerMessagePaise: s['ai.rate_per_message_paise'],

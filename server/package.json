@@ -4,7 +4,7 @@
   "description": "",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p .",
+    "build": "tsc -p . && node dist/db/prepare.js",
     "start": "node dist/index.js",
     "test": "vitest run",
     "typecheck": "tsc -p . --noEmit",

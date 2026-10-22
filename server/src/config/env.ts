@@ -30,6 +30,9 @@ export const env = {
 
   expoAccessToken: str('EXPO_ACCESS_TOKEN'),
   adminPhones: str('ADMIN_PHONES').split(',').filter(Boolean),
+  // Demo mode: POST /auth/demo hands out a fresh guest account so people can try the app without logging in.
+  // Never allowed in production.
+  demoMode: str('DEMO_MODE') === 'true',
 };
 
 export const isProd = env.nodeEnv === 'production';
@@ -42,5 +45,6 @@ export function assertProdConfig() {
     ['RAZORPAY_WEBHOOK_SECRET', env.razorpayWebhookSecret], ['ANTHROPIC_API_KEY', env.anthropicApiKey],
   ].filter(([, v]) => !v).map(([k]) => k);
   if (env.otpDevCode) missing.push('OTP_DEV_CODE must be empty in production');
+  if (env.demoMode) missing.push('DEMO_MODE must be off in production');
   if (missing.length) throw new Error(`Missing production config: ${missing.join(', ')}`);
 }

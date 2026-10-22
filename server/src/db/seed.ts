@@ -31,6 +31,10 @@ export async function seed() {
   console.log(`Seeded. Admin phone: ${adminPhone}. Demo pandit phones: +919000000000…+919000000005`);
 }
 
+if (import.meta.url === `file://${process.argv[1]}` && env.nodeEnv === 'production') {
+  console.log('seed: skipped in production (demo data must never reach a real database)');
+  process.exit(0);
+}
 if (import.meta.url === `file://${process.argv[1]}`) {
   if (env.databaseUrl) await connectPostgres(env.databaseUrl); else await connectPglite('./.data/db');
   await seed();

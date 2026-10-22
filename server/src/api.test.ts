@@ -7,6 +7,7 @@ import { io as ioc, type Socket } from 'socket.io-client';
 process.env.OTP_DEV_CODE = '123456';
 process.env.ADMIN_PHONES = '+919999999999';
 process.env.PUBLIC_URL = 'http://localhost:4000';
+process.env.DEMO_MODE = 'true';
 
 let base = '';
 let http: Server;
@@ -203,6 +204,18 @@ describe('user journey', () => {
   it('deletes the account and revokes its token', async () => {
     await api('/me', { method: 'DELETE', token });
     await expect(api('/me', { token })).rejects.toMatchObject({ status: 401 });
+  });
+});
+
+describe('demo mode', () => {
+  it('gives each visitor a ready guest account without OTP', async () => {
+    const g = await api('/auth/demo', { body: { language: 'en' } });
+    expect(g.user.consentCurrent).toBe(true);
+    expect(g.user.balancePaise).toBe(50000);
+    const me = await api('/me', { token: g.token });
+    expect(me.profiles).toHaveLength(1);
+    const g2 = await api('/auth/demo', { body: {} });
+    expect(g2.user.id).not.toBe(g.user.id);
   });
 });
 
