@@ -8,6 +8,7 @@ import { startBillingLoop } from './services/billing.js';
 import { pregenerateDaily } from './services/horoscope.js';
 import { dailyHoroscopePush } from './jobs/daily.js';
 import { removeOldPalmFiles, runRetention } from './jobs/retention.js';
+import { searchCities } from './services/places.js';
 
 async function main() {
   assertProdConfig();
@@ -28,7 +29,11 @@ async function main() {
   // 03:15 IST: delete data past its retention period.
   cron.schedule('15 3 * * *', () => { removeOldPalmFiles().then(runRetention).then((r) => console.log('retention', r)).catch(console.error); }, { timezone: 'Asia/Kolkata' });
 
-  http.listen(env.port, () => console.log(`Taara API on :${env.port}`));
+  http.listen(env.port, () => {
+    console.log(`Taara API on :${env.port}`);
+    // Warm the place list (≈1 s) so the first person searching for their birthplace doesn't wait.
+    setTimeout(() => { searchCities('de'); console.log('place list loaded'); }, 500);
+  });
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

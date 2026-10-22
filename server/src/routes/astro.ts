@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { LANGUAGES } from '../config/languages.js';
 import { env } from '../config/env.js';
-import { ageOn, requireAdult } from '../services/safety.js';
+import { ageOn, rateLimit, requireAdult } from '../services/safety.js';
 import { db, schema } from '../db/client.js';
 import { computeChart } from '../astro/engine.js';
 import { chartSummary, dailyEnergy } from '../astro/interpret.js';
@@ -14,7 +14,7 @@ import { transitHouses } from '../astro/interpret.js';
 import { NAKSHATRAS, SIGNS } from '../astro/constants.js';
 import { handler, HttpError, requireAuth } from '../lib/http.js';
 import { allSettings } from '../lib/settings.js';
-import { assertCoords, searchCities, tzOffsetAt } from '../services/places.js';
+import { assertCoords, geocode, searchCities, tzOffsetAt } from '../services/places.js';
 import { getHoroscope, periodKey, type Period } from '../services/horoscope.js';
 import { translateObject } from '../services/translate.js';
 import { track } from '../services/analytics.js';
@@ -43,7 +43,12 @@ astroRoutes.get('/meta', handler({}, async () => {
   };
 }));
 
-astroRoutes.get('/places/search', handler({ query: z.object({ q: z.string() }) }, async ({ query }) => searchCities(query.q)));
+astroRoutes.get('/places/search', handler({ query: z.object({ q: z.string().max(100) }) }, async ({ query }) => searchCities(query.q)));
+// Anything not in the place list (small villages, places abroad): looked up on OpenStreetMap.
+astroRoutes.get('/places/geocode', handler({ query: z.object({ q: z.string().min(2).max(100), lang: z.string().max(5).default('en') }) }, async ({ query, req }) => {
+  rateLimit(`geo:${req.ip}`, 10, 5);
+  return geocode(query.q, query.lang);
+}));
 
 astroRoutes.get('/places/tz', handler({
   query: z.object({ lat: z.coerce.number(), lon: z.coerce.number(), date: z.string().regex(dateRe), time: z.string().regex(timeRe).optional() }),

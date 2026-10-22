@@ -141,3 +141,11 @@ AI answers, horoscopes and reports are generated directly in the user's language
 | Palm reading prompt | `server/src/services/palm.ts` |
 | Astrology maths | `server/src/astro/` |
 | Any UI text | `mobile/src/i18n/locales/<lang>.json` |
+
+---
+
+## Data sources and credits
+
+- **Birthplaces in India:** India Post office directory (≈150,000 post offices with coordinates, including villages), published on data.gov.in under the Government Open Data Licence – India. Built into `server/data/places.tsv.gz` by the script in `server/scripts/build_places.py`.
+- **Places abroad / anything not listed:** looked up live on OpenStreetMap (Nominatim), © OpenStreetMap contributors. Nominatim allows light use only (1 request per second). Before a large launch, switch `geocode()` in `server/src/services/places.ts` to a paid geocoder (Google Places, Ola Maps or LocationIQ).
+- **Planet positions:** astronomy-engine (MIT).

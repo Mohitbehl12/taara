@@ -1,4 +1,8 @@
 import tzLookup from '@photostructure/tz-lookup';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { gunzipSync } from 'node:zlib';
 import { HttpError } from '../lib/http.js';
 
 /**
@@ -73,13 +77,110 @@ export const CITIES: [string, string, number, number][] = [
   ['Toronto', 'Canada', 43.6532, -79.3832], ['Sydney', 'Australia', -33.8688, 151.2093],
 ];
 
-export function searchCities(q: string, limit = 10) {
-  const s = q.trim().toLowerCase();
+// ---------- full place list ----------
+// data/places.tsv.gz: ~150k Indian villages/towns (India Post office directory, Open Government Data Licence – India)
+// + district centres + ~160k towns worldwide (GeoNames, CC BY 4.0). One line per place, most important first.
+// Stored compactly (one big string per column + typed arrays): ~20 MB instead of ~130 MB of objects.
+interface PlaceIndex { keys: string; keyStarts: Int32Array; names: string; nameStarts: Int32Array; regions: string[]; regionIdx: Uint32Array; lat: Float32Array; lon: Float32Array; n: number }
+let index: PlaceIndex | null = null;
+const norm = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+
+function loadPlaces(): PlaceIndex {
+  if (index) return index;
+  const file = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '../../data/places.tsv.gz');
+  const text = existsSync(file) ? gunzipSync(readFileSync(file)).toString('utf8') : '';
+  const curated = CITIES.map(([name, region, lat, lon]) => `${name}\t${region}\t${lat}\t${lon}`).join('\n');
+  const all = text ? `${curated}\n${text}` : curated;
+  // Walk the text line by line (no big array of line strings) to keep the loading peak low.
+  let n = 0;
+  for (let i = all.indexOf('\n'); i !== -1; i = all.indexOf('\n', i + 1)) n++;
+  if (!all.endsWith('\n')) n++;
+  const keyStarts = new Int32Array(n + 1); const nameStarts = new Int32Array(n + 1);
+  const regionIdx = new Uint32Array(n); const lat = new Float32Array(n); const lon = new Float32Array(n);
+  const regionMap = new Map<string, number>(); const regions: string[] = [];
+  const keyParts: string[] = []; const nameParts: string[] = [];
+  let kOff = 0; let nOff = 0;
+  let cursor = 0;
+  for (let i = 0; i < n; i++) {
+    let lineEnd = all.indexOf('\n', cursor); if (lineEnd === -1) lineEnd = all.length;
+    const [name, region, la, lo] = all.slice(cursor, lineEnd).split('\t');
+    cursor = lineEnd + 1;
+    if (!name) { i--; n--; continue; }
+    const key = `\n${norm(name)}`;
+    keyStarts[i] = kOff; kOff += key.length; keyParts.push(key);
+    nameStarts[i] = nOff; nOff += name.length; nameParts.push(name);
+    let ri = regionMap.get(region);
+    if (ri === undefined) { ri = regions.length; regions.push(region); regionMap.set(region, ri); }
+    regionIdx[i] = ri; lat[i] = Number(la); lon[i] = Number(lo);
+  }
+  keyStarts[n] = kOff; nameStarts[n] = nOff;
+  index = { keys: keyParts.join(''), keyStarts, names: nameParts.join(''), nameStarts, regions, regionIdx, lat, lon, n };
+  return index;
+}
+
+/** Row whose key contains character position `pos` (binary search over row starts). */
+function rowAt(ix: PlaceIndex, pos: number) {
+  let lo = 0; let hi = ix.n - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (ix.keyStarts[mid] <= pos) lo = mid; else hi = mid - 1; }
+  return lo;
+}
+
+/**
+ * Search by name, best first. "name, district" narrows by region. Matches: name starts with the query,
+ * then any word of the name starts with it. Covers Indian villages (by post office) and towns worldwide.
+ */
+export function searchCities(q: string, limit = 12) {
+  const [namePart, ...rest] = q.split(',');
+  const s = norm(namePart);
+  const regionQ = norm(rest.join(' '));
   if (s.length < 2) return [];
-  return CITIES.filter(([n]) => n.toLowerCase().startsWith(s))
-    .concat(CITIES.filter(([n]) => !n.toLowerCase().startsWith(s) && n.toLowerCase().includes(s)))
-    .slice(0, limit)
-    .map(([name, region, lat, lon]) => ({ name, region, lat, lon, label: `${name}, ${region}` }));
+  const ix = loadPlaces();
+  const picked: number[] = []; const seen = new Set<string>();
+  const take = (row: number) => {
+    const region = ix.regions[ix.regionIdx[row]];
+    if (regionQ && !norm(region).includes(regionQ)) return;
+    const name = ix.names.slice(ix.nameStarts[row], ix.nameStarts[row + 1]);
+    const label = `${name}, ${region}`;
+    if (seen.has(label)) return;
+    seen.add(label); picked.push(row);
+  };
+  // 1) names starting with the query, in importance order; 2) a later word starting with it.
+  for (const needle of [`\n${s}`, ` ${s}`]) {
+    let pos = ix.keys.indexOf(needle);
+    let scanned = 0;
+    while (pos !== -1 && picked.length < limit && scanned < 5000) {
+      const row = rowAt(ix, pos);
+      take(row); scanned++;
+      pos = ix.keys.indexOf(needle, ix.keyStarts[row + 1]);
+    }
+    if (picked.length >= limit) break;
+  }
+  return picked.map((row) => {
+    const name = ix.names.slice(ix.nameStarts[row], ix.nameStarts[row + 1]);
+    const region = ix.regions[ix.regionIdx[row]];
+    return { name, region, lat: Math.round(ix.lat[row] * 1e4) / 1e4, lon: Math.round(ix.lon[row] * 1e4) / 1e4, label: `${name}, ${region}` };
+  });
+}
+
+// ---------- fallback: OpenStreetMap geocoding for anything not in the list ----------
+// Nominatim usage policy: max 1 request/second, identify the app, cache results. For heavy production use,
+// switch to a paid geocoder (Google, Ola Maps, LocationIQ) via the same function.
+const geoCache = new Map<string, { label: string; lat: number; lon: number }[]>();
+let lastGeo = 0;
+export async function geocode(q: string, lang = 'en') {
+  const key = `${lang}:${norm(q)}`;
+  if (geoCache.has(key)) return geoCache.get(key)!;
+  const wait = lastGeo + 1100 - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  lastGeo = Date.now();
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&addressdetails=0&q=${encodeURIComponent(q)}&accept-language=${encodeURIComponent(lang)}`;
+  const r = await fetch(url, { headers: { 'User-Agent': 'TaaraAstrologyApp/1.0 (support@taara.app)' }, signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new HttpError(502, 'geocoder_unavailable');
+  const data = (await r.json()) as { display_name: string; lat: string; lon: string }[];
+  const out = data.map((d) => ({ label: d.display_name.split(', ').slice(0, 4).join(', '), lat: Number(d.lat), lon: Number(d.lon) }));
+  if (geoCache.size > 5000) geoCache.clear();
+  geoCache.set(key, out);
+  return out;
 }
 
 export function assertCoords(lat: number, lon: number) {

@@ -207,6 +207,18 @@ describe('user journey', () => {
   });
 });
 
+describe('birthplace search', () => {
+  it('finds district towns and villages across India, best match first', async () => {
+    const r = await api('/places/search?q=sitamarhi');
+    expect(r[0].label).toContain('Sitamarhi');
+    expect(r[0].region).toContain('Bihar');
+    const v = await api('/places/search?q=kothimir');
+    expect(v[0].region).toContain('Telangana');
+    const narrowed = await api('/places/search?q=ram nagar, bihar');
+    expect(narrowed.every((p: { region: string }) => p.region.includes('Bihar'))).toBe(true);
+  });
+});
+
 describe('demo mode', () => {
   it('gives each visitor a ready guest account without OTP', async () => {
     const g = await api('/auth/demo', { body: { language: 'en' } });
